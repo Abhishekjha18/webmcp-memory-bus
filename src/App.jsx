@@ -13,6 +13,7 @@ import {
   deleteRelation,
   exportMemory,
   importMemory,
+  exploreConcepts,
 } from "./lib/memoryStore";
 
 function formatTime(iso) {
@@ -118,6 +119,10 @@ export default function App() {
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
 
+  const [exploreEntity, setExploreEntity] = useState("");
+  const [exploreResult, setExploreResult] = useState(null);
+  const [exploring, setExploring] = useState(false);
+
   const [modelProgress, setModelProgress] = useState(null);
   const [transferNote, setTransferNote] = useState("");
   const fileInputRef = useRef(null);
@@ -184,6 +189,7 @@ export default function App() {
     if (!confirmed) return;
     await clearAllMemory();
     setSearchResults(null);
+    setExploreResult(null);
   }
 
   async function handleExport() {
@@ -226,6 +232,18 @@ export default function App() {
       setSearchResults(results);
     } finally {
       setSearching(false);
+    }
+  }
+
+  async function handleExplore(e) {
+    e.preventDefault();
+    if (!exploreEntity.trim()) return;
+    setExploring(true);
+    try {
+      const result = await exploreConcepts({ entity: exploreEntity.trim(), depth: 2 });
+      setExploreResult(result);
+    } finally {
+      setExploring(false);
     }
   }
 
@@ -481,6 +499,56 @@ export default function App() {
             subtitle="Semantic memory — how ideas relate"
             tool="link_concepts"
           />
+
+          <form onSubmit={handleExplore} className="form form-inline">
+            <input
+              type="text"
+              placeholder="Explore the graph from a concept…"
+              value={exploreEntity}
+              onChange={(e) => setExploreEntity(e.target.value)}
+            />
+            <button type="submit" disabled={exploring}>
+              {exploring ? "Walking graph…" : "Explore"}
+            </button>
+          </form>
+
+          {exploreResult && !exploreResult.found && (
+            <p className="transfer-note">
+              No concept named "{exploreResult.entity}" is in the graph yet.
+            </p>
+          )}
+
+          {exploreResult && exploreResult.found && (
+            <div className="explore-result">
+              <div className="explore-nodes">
+                {exploreResult.nodes.map((n) => (
+                  <span
+                    key={n.name}
+                    className={`chip node-chip${n.hops === 0 ? " node-chip-root" : ""}`}
+                    title={n.hops === 0 ? "starting point" : `${n.hops} hop${n.hops === 1 ? "" : "s"} away`}
+                  >
+                    {n.name}
+                    {n.hops > 0 && <span className="node-hops"> · {n.hops}</span>}
+                  </span>
+                ))}
+              </div>
+              {exploreResult.observations.length > 0 && (
+                <ul className="list explore-observations">
+                  {exploreResult.observations.map((o) => (
+                    <li key={o.id}>
+                      <div className="item-main">
+                        <div className="item-content">{o.content}</div>
+                        <div className="item-meta">
+                          <span className="item-time">{formatTime(o.timestamp)}</span>
+                        </div>
+                      </div>
+                    </li>
+                  ))}
+                </ul>
+              )}
+            </div>
+          )}
+
           <ul className="list">
             {relations.length === 0 && (
               <li className="empty">No links yet — agents build this graph as they learn.</li>

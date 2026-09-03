@@ -603,6 +603,44 @@ button.ghost.danger:hover:not(:disabled) {
   font-weight: 600;
 }
 
+.explore-result {
+  margin-bottom: 14px;
+  padding: 14px;
+  border-radius: 12px;
+  background: var(--accent-wash);
+  border: 1px solid var(--accent-line);
+}
+
+.explore-nodes {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+}
+
+.node-chip {
+  max-width: none;
+}
+
+.node-chip-root {
+  background: var(--text);
+  color: #000;
+  border-color: var(--text);
+  font-weight: 600;
+}
+
+.node-hops {
+  color: var(--text-tertiary);
+}
+
+.node-chip-root .node-hops {
+  color: rgba(0, 0, 0, 0.55);
+}
+
+.explore-observations {
+  margin-top: 12px;
+  max-height: none;
+}
+
 .score {
   font-family: var(--mono);
   font-size: 0.78rem;
