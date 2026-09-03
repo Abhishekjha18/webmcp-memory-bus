@@ -14,6 +14,7 @@ import {
   exportMemory,
   importMemory,
   exploreConcepts,
+  AUTHORS,
 } from "./lib/memoryStore";
 
 function formatTime(iso) {
@@ -51,6 +52,18 @@ function sourceLabel(url) {
     return "source";
   }
 }
+
+const AUTHOR_LABELS = {
+  [AUTHORS.HUMAN]: { text: "you", title: "Typed directly into this page." },
+  [AUTHORS.AGENT]: {
+    text: "agent",
+    title: "Stored by an agent through store_observation, not typed by a person.",
+  },
+  [AUTHORS.IMPORTED]: {
+    text: "imported",
+    title: "Restored from a JSON file. Its own claimed authorship is not trusted on import.",
+  },
+};
 
 const icons = {
   capture: (
@@ -173,6 +186,9 @@ export default function App() {
           .split(",")
           .map((t) => t.trim())
           .filter(Boolean),
+        // This form is the one genuinely first-party "a person typed this"
+        // boundary — the only place author: human is honest to assert.
+        author: AUTHORS.HUMAN,
       });
       setContent("");
       setSourceUrl("");
@@ -466,6 +482,11 @@ export default function App() {
                         flagged
                       </span>
                     )}
+                    {AUTHOR_LABELS[o.author] && (
+                      <span className={`chip author author-${o.author}`} title={AUTHOR_LABELS[o.author].title}>
+                        {AUTHOR_LABELS[o.author].text}
+                      </span>
+                    )}
                     <span className="item-time">{formatTime(o.timestamp)}</span>
                     {o.source_url && (
                       <a href={o.source_url} target="_blank" rel="noreferrer" title={o.source_url}>
@@ -539,6 +560,14 @@ export default function App() {
                       <div className="item-main">
                         <div className="item-content">{o.content}</div>
                         <div className="item-meta">
+                          {AUTHOR_LABELS[o.author] && (
+                            <span
+                              className={`chip author author-${o.author}`}
+                              title={AUTHOR_LABELS[o.author].title}
+                            >
+                              {AUTHOR_LABELS[o.author].text}
+                            </span>
+                          )}
                           <span className="item-time">{formatTime(o.timestamp)}</span>
                         </div>
                       </div>

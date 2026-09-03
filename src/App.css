@@ -603,6 +603,15 @@ button.ghost.danger:hover:not(:disabled) {
   font-weight: 600;
 }
 
+/* Neutral, informational — unlike .flag this is not a warning. */
+.chip.author {
+  font-family: var(--mono);
+}
+
+.chip.author-imported {
+  font-style: italic;
+}
+
 .explore-result {
   margin-bottom: 14px;
   padding: 14px;
