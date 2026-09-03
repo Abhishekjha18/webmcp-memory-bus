@@ -25,6 +25,7 @@
         getWorkingMemory,
         linkConcepts,
         summarizeContext,
+        exploreConcepts,
       } from "./src/lib/memoryStore.js";
       import { untrustedEnvelope, boundOutput } from "./src/lib/sanitize.js";
 
@@ -49,6 +50,10 @@
         summarize_context: async (args) => {
           const digest = await summarizeContext(args);
           return { ...digest, observations: shield(digest.observations) };
+        },
+        explore_concepts: async (args) => {
+          const result = await exploreConcepts(args);
+          return { ...result, observations: shield(result.observations) };
         },
       };
 
