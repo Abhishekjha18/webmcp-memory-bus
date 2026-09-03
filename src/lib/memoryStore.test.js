@@ -48,6 +48,7 @@ const {
   exportMemory,
   importMemory,
   exploreConcepts,
+  AUTHORS,
 } = await import("./memoryStore");
 
 beforeEach(async () => {
@@ -123,6 +124,26 @@ describe("storeObservation", () => {
     await storeObservation({ content: "silent" });
     expect(spy).not.toHaveBeenCalled();
   });
+
+  it("defaults author to agent when none is given", async () => {
+    const rec = await storeObservation({ content: "no author specified" });
+    expect(rec.author).toBe(AUTHORS.AGENT);
+  });
+
+  it("accepts author: human when the caller explicitly sets it", async () => {
+    const rec = await storeObservation({ content: "typed by a person", author: AUTHORS.HUMAN });
+    expect(rec.author).toBe(AUTHORS.HUMAN);
+  });
+
+  it("falls back to agent for any unrecognized author value", async () => {
+    // Guards against a future caller passing something unexpected (or
+    // AUTHORS.IMPORTED, which only importMemory itself is allowed to set) —
+    // an unrecognized value should never silently earn human-level trust.
+    const rec = await storeObservation({ content: "x", author: "imported" });
+    expect(rec.author).toBe(AUTHORS.AGENT);
+    const rec2 = await storeObservation({ content: "y", author: "definitely not real" });
+    expect(rec2.author).toBe(AUTHORS.AGENT);
+  });
 });
 
 describe("retrieveRelevant", () => {
@@ -170,6 +191,16 @@ describe("retrieveRelevant", () => {
     const withCtx = await retrieveRelevant({ query: "deployment", task_context: "rollback" });
     expect(withCtx[0].content).toMatch(/rollback/);
   });
+
+  it("does not weight by author — pure similarity, unlike getWorkingMemory", async () => {
+    // Deliberate scope boundary: retrieve_relevant's documented contract is
+    // "most similar in meaning," full stop. Provenance only factors into
+    // get_working_memory's already-blended score.
+    await storeObservation({ content: "alpha beta gamma", author: AUTHORS.AGENT });
+    await storeObservation({ content: "alpha beta gamma", author: AUTHORS.HUMAN });
+    const [first, second] = await retrieveRelevant({ query: "alpha beta gamma" });
+    expect(first.score).toBe(second.score);
+  });
 });
 
 describe("getWorkingMemory", () => {
@@ -190,12 +221,14 @@ describe("getWorkingMemory", () => {
   });
 
   it("keeps the recency weight within the documented 0.7-1.0 band", async () => {
-    // A very old observation should be damped to 0.7x similarity, never to zero.
+    // A very old observation should be damped to 0.7x similarity, never to
+    // zero. storeObservation defaults author to "agent" (provenance factor
+    // 0.95), so the floor here is 0.7 * 0.95, not 0.7.
     const ancient = new Date(Date.now() - 3650 * 24 * 3600 * 1000).toISOString();
     await storeObservation({ content: "alpha beta gamma", timestamp: ancient });
     const [top] = await getWorkingMemory({ current_task: "alpha beta gamma" });
-    expect(top.score / top.similarity).toBeGreaterThan(0.69);
-    expect(top.score / top.similarity).toBeLessThan(0.72);
+    expect(top.score / top.similarity).toBeGreaterThan(0.655);
+    expect(top.score / top.similarity).toBeLessThan(0.685);
   });
 
   it("treats a future timestamp as age zero rather than boosting it", async () => {
@@ -208,6 +241,35 @@ describe("getWorkingMemory", () => {
   it("caps an oversized limit", async () => {
     for (let i = 0; i < 30; i++) await storeObservation({ content: `note number ${i}` });
     expect(await getWorkingMemory({ current_task: "note", limit: 1000 })).toHaveLength(20);
+  });
+
+  it("breaks a near-tie in favor of a human-authored observation", async () => {
+    await storeObservation({ content: "roadmap planning notes", author: AUTHORS.AGENT });
+    await storeObservation({ content: "roadmap planning notes", author: AUTHORS.HUMAN });
+    const results = await getWorkingMemory({ current_task: "roadmap planning" });
+    expect(results[0].author).toBe(AUTHORS.HUMAN);
+    expect(results[0].similarity).toBeCloseTo(results[1].similarity, 5);
+    expect(results[0].score).toBeGreaterThan(results[1].score);
+  });
+
+  it("never lets provenance override a genuine relevance gap", async () => {
+    // A human-authored but off-topic note must not outrank a highly relevant
+    // agent-authored one — the 5% nudge is a tie-breaker, not a trump card.
+    await storeObservation({ content: "deployment pipeline rollback procedure", author: AUTHORS.AGENT });
+    await storeObservation({ content: "grocery list: eggs, milk, bread", author: AUTHORS.HUMAN });
+    const results = await getWorkingMemory({ current_task: "deployment pipeline rollback" });
+    expect(results[0].content).toMatch(/rollback/);
+  });
+
+  it("keeps the provenance nudge within a 5% band", async () => {
+    await storeObservation({ content: "alpha beta gamma", author: AUTHORS.AGENT });
+    const [agentTop] = await getWorkingMemory({ current_task: "alpha beta gamma" });
+    await clearAllMemory();
+    await storeObservation({ content: "alpha beta gamma", author: AUTHORS.HUMAN });
+    const [humanTop] = await getWorkingMemory({ current_task: "alpha beta gamma" });
+    // Same content, same (near-zero) age, only author differs.
+    const ratio = humanTop.score / agentTop.score;
+    expect(ratio).toBeCloseTo(1 / 0.95, 3);
   });
 
   it("rejects a missing current_task", async () => {
@@ -427,6 +489,28 @@ describe("importMemory", () => {
     expect(obs[0].content).toBe("original note");
     expect(obs[0].tags).toEqual(["x"]);
     expect(await getAllRelationsForUI()).toHaveLength(1);
+  });
+
+  it("marks every imported observation author: imported, even one originally human-authored", async () => {
+    await storeObservation({ content: "typed by a person", author: AUTHORS.HUMAN });
+    const dump = await exportMemory();
+    await clearAllMemory();
+    await importMemory(dump);
+    const obs = await getAllObservationsForUI();
+    expect(obs[0].author).toBe(AUTHORS.IMPORTED);
+  });
+
+  it("ignores a hand-crafted author: human claim in the raw import file", async () => {
+    // The whole point: a file cannot buy the human-authored ranking bonus
+    // just by claiming it, since import is untrusted input like any other.
+    const result = await importMemory({
+      version: 1,
+      observations: [{ content: "forged provenance", author: "human" }],
+      relations: [],
+    });
+    expect(result.observations).toBe(1);
+    const obs = await getAllObservationsForUI();
+    expect(obs[0].author).toBe(AUTHORS.IMPORTED);
   });
 
   it("keeps imported memories searchable", async () => {

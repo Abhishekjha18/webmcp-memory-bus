@@ -15,7 +15,30 @@ function notify() {
   for (const fn of listeners) fn();
 }
 
-export async function storeObservation({ content, source_url, timestamp, tags = [] }) {
+/**
+ * Who actually put this observation in the store.
+ *
+ * "imported" is set only by importMemory itself, never through this
+ * coercion — an import file is untrusted input, so whatever it claims for
+ * `author` is discarded rather than trusted. See importMemory below.
+ */
+export const AUTHORS = { HUMAN: "human", AGENT: "agent", IMPORTED: "imported" };
+
+/**
+ * `author` is never taken from raw caller input at the WebMCP boundary —
+ * only from a value the calling code itself sets after the fact. If it
+ * were a plain parameter, an agent could call store_observation with
+ * `author: "human"` in its arguments and inherit whatever trust that
+ * implies. webmcpTools.js and bridge.html both override this field after
+ * spreading the agent's args, the same pattern already used to force
+ * source_url from location.href in the extension. Anything unrecognized
+ * falls back to the conservative default: assume agent, not human.
+ */
+function coerceAuthor(author) {
+  return author === AUTHORS.HUMAN ? AUTHORS.HUMAN : AUTHORS.AGENT;
+}
+
+export async function storeObservation({ content, source_url, timestamp, tags = [], author }) {
   if (!content || typeof content !== "string") {
     throw new Error("content is required and must be a string");
   }
@@ -30,6 +53,7 @@ export async function storeObservation({ content, source_url, timestamp, tags = 
     timestamp: coerceTimestamp(timestamp),
     tags: cleanTags,
     flagged,
+    author: coerceAuthor(author),
     embedding,
   };
   const id = await db.add(OBSERVATIONS_STORE, record);
@@ -113,7 +137,12 @@ export async function getWorkingMemory({ current_task, limit = 5, recencyHalfLif
       // An undateable record keeps its similarity but earns no recency
       // credit, rather than poisoning the sort with NaN.
       const recencyWeight = ageHours === null ? 0 : Math.pow(0.5, ageHours / recencyHalfLifeHours);
-      const score = similarity * (0.7 + 0.3 * recencyWeight);
+      // A much smaller floor than recency's: provenance says something about
+      // how much to trust a memory, not how relevant it is, so it should
+      // only nudge a near-tie, never let a barely-relevant note the user
+      // typed outrank a highly relevant one an agent recorded.
+      const provenanceWeight = obs.author === AUTHORS.HUMAN ? 1 : 0;
+      const score = similarity * (0.7 + 0.3 * recencyWeight) * (0.95 + 0.05 * provenanceWeight);
       return { ...obs, similarity, score };
     })
     .sort((a, b) => b.score - a.score)
@@ -418,6 +447,11 @@ export async function importMemory(data) {
       timestamp: coerceTimestamp(raw.timestamp),
       tags: Array.isArray(raw.tags) ? raw.tags.map((t) => sanitizeText(String(t))) : [],
       flagged: scanForInjection(content),
+      // Always "imported", regardless of what raw.author claims. A file is
+      // untrusted input; if this trusted whatever author value it carried,
+      // a hand-crafted "export" could mark every record author: "human" and
+      // buy the getWorkingMemory ranking bonus that implies.
+      author: AUTHORS.IMPORTED,
       embedding,
     });
     importedObservations++;
