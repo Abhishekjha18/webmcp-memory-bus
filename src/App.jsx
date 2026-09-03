@@ -17,10 +17,67 @@ import {
 
 function formatTime(iso) {
   try {
-    return new Date(iso).toLocaleString();
+    return new Date(iso).toLocaleString(undefined, {
+      month: "short",
+      day: "numeric",
+      hour: "2-digit",
+      minute: "2-digit",
+    });
   } catch {
     return iso;
   }
+}
+
+const icons = {
+  capture: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M12 5v14M5 12h14" strokeLinecap="round" />
+    </svg>
+  ),
+  search: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="11" cy="11" r="6.5" />
+      <path d="M16 16l4.5 4.5" strokeLinecap="round" />
+    </svg>
+  ),
+  activity: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <path d="M3 12h4l3-7 4 14 3-7h4" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  ),
+  store: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <ellipse cx="12" cy="6" rx="7.5" ry="3" />
+      <path d="M4.5 6v12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3V6" />
+      <path d="M4.5 12c0 1.7 3.4 3 7.5 3s7.5-1.3 7.5-3" />
+    </svg>
+  ),
+  graph: (
+    <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+      <circle cx="6" cy="7" r="2.5" />
+      <circle cx="18" cy="7" r="2.5" />
+      <circle cx="12" cy="18" r="2.5" />
+      <path d="M8.4 8.4l2.2 7.2M15.6 8.4l-2.2 7.2M8.5 7h7" />
+    </svg>
+  ),
+};
+
+function CardHeader({ icon, title, subtitle, tool, actions }) {
+  return (
+    <div className="card-header">
+      <div className="card-heading">
+        <span className="card-icon" aria-hidden="true">
+          {icons[icon]}
+        </span>
+        <div>
+          <h2>{title}</h2>
+          {subtitle && <p className="card-subtitle">{subtitle}</p>}
+        </div>
+      </div>
+      {tool && <span className="tool-chip">{tool}</span>}
+      {actions}
+    </div>
+  );
 }
 
 export default function App() {
@@ -149,29 +206,65 @@ export default function App() {
     }
   }
 
+  const statusLabel = {
+    available: "Tools registered",
+    unavailable: "WebMCP unavailable",
+    checking: "Checking WebMCP",
+  }[webmcpStatus];
+
   return (
     <div className="page">
+      <div className="glow" aria-hidden="true" />
+
       <header className="header">
         <div className="brand">
+          <span className="brand-mark" aria-hidden="true">
+            <svg viewBox="0 0 24 24" fill="none" stroke="currentColor" strokeWidth="1.8">
+              <circle cx="7" cy="8" r="2.4" />
+              <circle cx="17" cy="6.5" r="2.4" />
+              <circle cx="16" cy="17" r="2.4" />
+              <circle cx="6.5" cy="16" r="2.4" />
+              <path d="M9.2 8.8l5.5-1.6M8.1 10.2l7 5.2M8.6 15.1l5-6.4M8.9 16.4h4.7" />
+            </svg>
+          </span>
           <div>
             <h1>Agent Memory Bus</h1>
-            <p className="subtitle">Persistent, browser-local semantic memory exposed over WebMCP.</p>
+            <p className="subtitle">
+              Persistent, browser-local semantic memory that any agent can read and write over WebMCP.
+            </p>
           </div>
         </div>
-        <span className={`status-badge status-${webmcpStatus}`}>
+        <span className={`status-pill status-${webmcpStatus}`}>
           <span className="status-dot" aria-hidden="true" />
-          {webmcpStatus === "available" && "WebMCP tools registered"}
-          {webmcpStatus === "unavailable" && "WebMCP not available in this browser"}
-          {webmcpStatus === "checking" && "Checking WebMCP..."}
+          {statusLabel}
         </span>
       </header>
+
+      <div className="stats">
+        <div className="stat">
+          <span className="stat-value">{observations.length}</span>
+          <span className="stat-label">Observations</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{relations.length}</span>
+          <span className="stat-label">Concept links</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{activity.length}</span>
+          <span className="stat-label">Tool calls</span>
+        </div>
+        <div className="stat">
+          <span className="stat-value">{webmcpStatus === "available" ? 5 : 0}</span>
+          <span className="stat-label">Tools exposed</span>
+        </div>
+      </div>
 
       {modelProgress && (
         <div className="model-progress" role="status">
           <div className="model-progress-label">
             {modelProgress.status === "error"
               ? `Embedding model failed to load: ${modelProgress.error}`
-              : `Downloading embedding model (runs locally, once) — ${modelProgress.percent}%`}
+              : `Downloading embedding model — runs locally, once · ${modelProgress.percent}%`}
           </div>
           {modelProgress.status !== "error" && (
             <div className="model-progress-track">
@@ -182,138 +275,153 @@ export default function App() {
       )}
 
       <main className="grid">
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Add an observation</h2>
-            <p className="hint" style={{ margin: 0 }}>
-              An agent normally calls <code>store_observation</code> for you
-            </p>
-          </div>
-          <form onSubmit={handleAddObservation} className="form">
-            <textarea
-              placeholder="What did you read, decide, or notice?"
-              value={content}
-              onChange={(e) => setContent(e.target.value)}
-              rows={3}
-              required
+        <div className="column">
+          <section className="card">
+            <CardHeader
+              icon="capture"
+              title="Capture"
+              subtitle="Record something worth remembering"
+              tool="store_observation"
             />
-            <input
-              type="text"
-              placeholder="Source URL (optional)"
-              value={sourceUrl}
-              onChange={(e) => setSourceUrl(e.target.value)}
-            />
-            <input
-              type="text"
-              placeholder="Tags, comma separated (optional)"
-              value={tags}
-              onChange={(e) => setTags(e.target.value)}
-            />
-            <button type="submit" disabled={saving}>
-              {saving ? "Embedding + saving..." : "Store observation"}
-            </button>
-          </form>
-        </section>
+            <form onSubmit={handleAddObservation} className="form">
+              <textarea
+                placeholder="What did you read, decide, or notice?"
+                value={content}
+                onChange={(e) => setContent(e.target.value)}
+                rows={3}
+                required
+              />
+              <input
+                type="text"
+                placeholder="Source URL (optional)"
+                value={sourceUrl}
+                onChange={(e) => setSourceUrl(e.target.value)}
+              />
+              <input
+                type="text"
+                placeholder="Tags, comma separated (optional)"
+                value={tags}
+                onChange={(e) => setTags(e.target.value)}
+              />
+              <button type="submit" disabled={saving}>
+                {saving ? "Embedding…" : "Store observation"}
+              </button>
+            </form>
+          </section>
 
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Search memory</h2>
-            <p className="hint" style={{ margin: 0 }}>
-              Semantic similarity, not keyword match
-            </p>
-          </div>
-          <form onSubmit={handleSearch} className="form">
-            <input
-              type="text"
-              placeholder="Search stored memory by meaning..."
-              value={query}
-              onChange={(e) => setQuery(e.target.value)}
+          <section className="card">
+            <CardHeader
+              icon="search"
+              title="Recall"
+              subtitle="Search by meaning, not keywords"
+              tool="retrieve_relevant"
             />
-            <button type="submit" disabled={searching}>
-              {searching ? "Searching..." : "retrieve_relevant"}
-            </button>
-          </form>
-          {searchResults && (
-            <ul className="results">
-              {searchResults.length === 0 && <li className="empty">No matches.</li>}
-              {searchResults.map((r) => (
-                <li key={r.id}>
-                  <div>
-                    <div className="obs-content">{r.content}</div>
-                    <div className="obs-meta">{formatTime(r.timestamp)}</div>
+            <form onSubmit={handleSearch} className="form form-inline">
+              <input
+                type="text"
+                placeholder="What are you looking for?"
+                value={query}
+                onChange={(e) => setQuery(e.target.value)}
+              />
+              <button type="submit" disabled={searching}>
+                {searching ? "Searching…" : "Search"}
+              </button>
+            </form>
+            {searchResults && (
+              <ul className="list">
+                {searchResults.length === 0 && <li className="empty">No matches found.</li>}
+                {searchResults.map((r) => (
+                  <li key={r.id}>
+                    <div className="item-main">
+                      <div className="item-content">{r.content}</div>
+                      <div className="item-meta">{formatTime(r.timestamp)}</div>
+                    </div>
+                    <span className="score">{r.score.toFixed(2)}</span>
+                  </li>
+                ))}
+              </ul>
+            )}
+          </section>
+        </div>
+
+        <div className="column">
+          <section className="card card-tall">
+            <CardHeader
+              icon="activity"
+              title="Tool activity"
+              subtitle="Every agent call, as it happens"
+            />
+            <ul className="list activity-log">
+              {activity.length === 0 && (
+                <li className="empty">
+                  No tool calls yet. Connect an agent and they will appear here live.
+                </li>
+              )}
+              {activity.map((entry, i) => (
+                <li key={i} className={entry.ok ? "ok" : "err"}>
+                  <div className="item-main">
+                    <code>{entry.name}</code>
+                    {!entry.ok && <div className="item-error">{entry.error}</div>}
                   </div>
-                  <div className="score">{r.score.toFixed(3)}</div>
+                  <span className="item-time">{formatTime(entry.at)}</span>
                 </li>
               ))}
             </ul>
-          )}
-        </section>
+          </section>
+        </div>
 
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Tool activity</h2>
-            <p className="hint" style={{ margin: 0 }}>Every call an agent makes, live</p>
-          </div>
-          <ul className="activity-log">
-            {activity.length === 0 && <li className="empty">No tool calls yet.</li>}
-            {activity.map((entry, i) => (
-              <li key={i} className={entry.ok ? "ok" : "err"}>
-                <div className="activity-log-main">
-                  <code>{entry.name}</code>
-                  {!entry.ok && <div className="activity-error">{entry.error}</div>}
-                </div>
-                <span className="activity-time">{formatTime(entry.at)}</span>
-              </li>
-            ))}
-          </ul>
-        </section>
-
-        <section className="panel">
-          <div className="panel-header">
-            <h2>Stored observations ({observations.length})</h2>
-            <div className="panel-actions">
-              <button className="ghost" onClick={handleExport}>
-                Export
-              </button>
-              <button className="ghost" onClick={() => fileInputRef.current?.click()}>
-                Import
-              </button>
-              <input
-                ref={fileInputRef}
-                type="file"
-                accept="application/json,.json"
-                onChange={handleImportFile}
-                hidden
-              />
-              <button className="ghost" onClick={handleClearAll}>
-                Clear all
-              </button>
-            </div>
-          </div>
+        <section className="card card-wide">
+          <CardHeader
+            icon="store"
+            title={`Stored observations (${observations.length})`}
+            subtitle="Episodic memory — what happened, and when"
+            actions={
+              <div className="card-actions">
+                <button className="ghost" onClick={handleExport}>
+                  Export
+                </button>
+                <button className="ghost" onClick={() => fileInputRef.current?.click()}>
+                  Import
+                </button>
+                <input
+                  ref={fileInputRef}
+                  type="file"
+                  accept="application/json,.json"
+                  onChange={handleImportFile}
+                  hidden
+                />
+                <button className="ghost danger" onClick={handleClearAll}>
+                  Clear all
+                </button>
+              </div>
+            }
+          />
           {transferNote && <p className="transfer-note">{transferNote}</p>}
-          <ul className="obs-list">
-            {observations.length === 0 && <li className="empty">Nothing stored yet.</li>}
+          <ul className="list">
+            {observations.length === 0 && (
+              <li className="empty">Nothing stored yet — capture your first observation above.</li>
+            )}
             {observations.map((o) => (
               <li key={o.id}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="obs-content">{o.content}</div>
-                  <div className="obs-meta">
+                <div className="item-main">
+                  <div className="item-content">{o.content}</div>
+                  <div className="item-meta">
                     {o.flagged && (
                       <span
-                        className="badge flag"
+                        className="chip flag"
                         title="This text matches prompt-injection patterns. It is stored and shown as-is, and is marked as untrusted content when returned to an agent."
                       >
                         flagged
                       </span>
                     )}
-                    <span>{formatTime(o.timestamp)}</span>
+                    <span className="item-time">{formatTime(o.timestamp)}</span>
                     {o.source_url && (
                       <a href={o.source_url} target="_blank" rel="noreferrer">
                         source
                       </a>
                     )}
                     {o.tags?.map((tag) => (
-                      <span className="badge" key={tag}>
+                      <span className="chip" key={tag}>
                         {tag}
                       </span>
                     ))}
@@ -332,19 +440,28 @@ export default function App() {
           </ul>
         </section>
 
-        <section className="panel">
-          <h2>Concept links ({relations.length})</h2>
-          <ul className="obs-list">
-            {relations.length === 0 && <li className="empty">No links recorded yet.</li>}
+        <section className="card card-wide">
+          <CardHeader
+            icon="graph"
+            title={`Concept links (${relations.length})`}
+            subtitle="Semantic memory — how ideas relate"
+            tool="link_concepts"
+          />
+          <ul className="list">
+            {relations.length === 0 && (
+              <li className="empty">No links yet — agents build this graph as they learn.</li>
+            )}
             {relations.map((r) => (
               <li key={r.id}>
-                <div style={{ flex: 1, minWidth: 0 }}>
-                  <div className="obs-content">
-                    <strong>{r.entity1}</strong> —{r.relation}→ <strong>{r.entity2}</strong>
+                <div className="item-main">
+                  <div className="item-content relation">
+                    <span className="entity">{r.entity1}</span>
+                    <span className="relation-arrow">{r.relation}</span>
+                    <span className="entity">{r.entity2}</span>
                   </div>
-                  <div className="obs-meta">
-                    <span className="badge">conf {r.confidence}</span>
-                    <span>{formatTime(r.timestamp)}</span>
+                  <div className="item-meta">
+                    <span className="chip">conf {r.confidence}</span>
+                    <span className="item-time">{formatTime(r.timestamp)}</span>
                   </div>
                 </div>
                 <button
@@ -360,6 +477,10 @@ export default function App() {
           </ul>
         </section>
       </main>
+
+      <footer className="footer">
+        Runs entirely in your browser — IndexedDB storage, local embeddings, no server.
+      </footer>
     </div>
   );
 }
