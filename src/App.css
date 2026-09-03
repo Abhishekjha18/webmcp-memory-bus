@@ -495,6 +495,13 @@ button.ghost.danger:hover:not(:disabled) {
   font-size: 0.89rem;
   line-height: 1.5;
   word-break: break-word;
+  /* Agents store long passages; without a clamp a single multi-thousand
+     character observation fills the whole list and buries the rest. */
+  display: -webkit-box;
+  -webkit-line-clamp: 5;
+  line-clamp: 5;
+  -webkit-box-orient: vertical;
+  overflow: hidden;
 }
 
 .item-content.relation {
@@ -554,6 +561,12 @@ button.ghost.danger:hover:not(:disabled) {
   color: var(--text-secondary);
   background: rgba(255, 255, 255, 0.055);
   border: 1px solid var(--border);
+  /* Tags arrive from agents and are unbounded; an unbroken 200-character
+     tag would otherwise stretch the row past the edge of the card. */
+  max-width: 18ch;
+  overflow: hidden;
+  text-overflow: ellipsis;
+  white-space: nowrap;
 }
 
 .chip.flag {

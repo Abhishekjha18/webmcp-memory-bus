@@ -27,7 +27,7 @@ export async function storeObservation({ content, source_url, timestamp, tags = 
   const record = {
     content: cleanContent,
     source_url: source_url || null,
-    timestamp: timestamp || new Date().toISOString(),
+    timestamp: coerceTimestamp(timestamp),
     tags: cleanTags,
     flagged,
     embedding,
@@ -42,6 +42,48 @@ async function allObservations() {
   return db.getAll(OBSERVATIONS_STORE);
 }
 
+const DEFAULT_RETRIEVAL_LIMIT = 5;
+
+/**
+ * Coerce a caller-supplied `limit` into [1, MAX_RETRIEVAL_LIMIT].
+ *
+ * A raw value went straight into `Array.slice`, where anything unexpected
+ * failed silently rather than loudly: a negative limit sliced from the end
+ * of the ranking, and a non-numeric one produced NaN, which slices to an
+ * empty array. Both hand an agent a confident, wrong answer — "your memory
+ * has nothing about this" — which is worse than an error.
+ */
+function coerceLimit(limit) {
+  const n = Number(limit);
+  if (!Number.isFinite(n)) return DEFAULT_RETRIEVAL_LIMIT;
+  return Math.min(Math.max(Math.floor(n), 1), MAX_RETRIEVAL_LIMIT);
+}
+
+/**
+ * Milliseconds since an observation was recorded, or null when its
+ * timestamp is unparseable. Import accepts any string as a timestamp, so a
+ * hand-edited file can carry garbage here; letting that reach the recency
+ * math turns the score into NaN and makes the whole sort order undefined.
+ */
+/**
+ * Normalise a caller- or file-supplied timestamp to a real ISO string,
+ * falling back to now. Storing an unparseable date is what let a single
+ * bad record scramble recency ranking for the whole store.
+ */
+function coerceTimestamp(timestamp) {
+  if (typeof timestamp === "string") {
+    const t = new Date(timestamp).getTime();
+    if (Number.isFinite(t)) return new Date(t).toISOString();
+  }
+  return new Date().toISOString();
+}
+
+function ageHoursOrNull(timestamp, now) {
+  const t = new Date(timestamp).getTime();
+  if (!Number.isFinite(t)) return null;
+  return Math.max(0, (now - t) / 3_600_000);
+}
+
 export async function retrieveRelevant({ query, task_context = "", limit = 5 }) {
   if (!query || typeof query !== "string") {
     throw new Error("query is required and must be a string");
@@ -52,7 +94,7 @@ export async function retrieveRelevant({ query, task_context = "", limit = 5 }) 
   const ranked = observations
     .map((obs) => ({ ...obs, score: cosineSimilarity(queryEmbedding, obs.embedding) }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, Math.min(limit, MAX_RETRIEVAL_LIMIT))
+    .slice(0, coerceLimit(limit))
     .map(({ embedding, ...rest }) => rest);
   return ranked;
 }
@@ -67,15 +109,28 @@ export async function getWorkingMemory({ current_task, limit = 5, recencyHalfLif
   const ranked = observations
     .map((obs) => {
       const similarity = cosineSimilarity(queryEmbedding, obs.embedding);
-      const ageHours = Math.max(0, (now - new Date(obs.timestamp).getTime()) / 3_600_000);
-      const recencyWeight = Math.pow(0.5, ageHours / recencyHalfLifeHours);
+      const ageHours = ageHoursOrNull(obs.timestamp, now);
+      // An undateable record keeps its similarity but earns no recency
+      // credit, rather than poisoning the sort with NaN.
+      const recencyWeight = ageHours === null ? 0 : Math.pow(0.5, ageHours / recencyHalfLifeHours);
       const score = similarity * (0.7 + 0.3 * recencyWeight);
       return { ...obs, similarity, score };
     })
     .sort((a, b) => b.score - a.score)
-    .slice(0, Math.min(limit, MAX_RETRIEVAL_LIMIT))
+    .slice(0, coerceLimit(limit))
     .map(({ embedding, ...rest }) => rest);
   return ranked;
+}
+
+/**
+ * The tool schema documents confidence as 0-1, but a schema is a hint, not
+ * an enforced contract — an agent can send 999 or "high". Clamp rather than
+ * reject, so a bad score never silently outranks a good one in the graph.
+ */
+function coerceConfidence(confidence) {
+  const n = Number(confidence);
+  if (!Number.isFinite(n)) return 1;
+  return Math.min(Math.max(n, 0), 1);
 }
 
 export async function linkConcepts({ entity1, entity2, relation, confidence = 1 }) {
@@ -85,6 +140,7 @@ export async function linkConcepts({ entity1, entity2, relation, confidence = 1 
   const cleanEntity1 = sanitizeText(entity1);
   const cleanEntity2 = sanitizeText(entity2);
   const cleanRelation = sanitizeText(relation);
+  const cleanConfidence = coerceConfidence(confidence);
   const db = await getDB();
   const tx = db.transaction([CONCEPTS_STORE, RELATIONS_STORE], "readwrite");
   await tx.objectStore(CONCEPTS_STORE).put({ name: cleanEntity1 });
@@ -93,12 +149,18 @@ export async function linkConcepts({ entity1, entity2, relation, confidence = 1 
     entity1: cleanEntity1,
     entity2: cleanEntity2,
     relation: cleanRelation,
-    confidence,
+    confidence: cleanConfidence,
     timestamp: new Date().toISOString(),
   });
   await tx.done;
   notify();
-  return { id, entity1: cleanEntity1, entity2: cleanEntity2, relation: cleanRelation, confidence };
+  return {
+    id,
+    entity1: cleanEntity1,
+    entity2: cleanEntity2,
+    relation: cleanRelation,
+    confidence: cleanConfidence,
+  };
 }
 
 export async function summarizeContext({ time_range, topic_filter }) {
@@ -106,10 +168,20 @@ export async function summarizeContext({ time_range, topic_filter }) {
   let filtered = observations;
 
   if (time_range && (time_range.start || time_range.end)) {
-    const start = time_range.start ? new Date(time_range.start).getTime() : -Infinity;
-    const end = time_range.end ? new Date(time_range.end).getTime() : Infinity;
+    // An unparseable bound used to become NaN, and every comparison against
+    // NaN is false — so a typo'd date silently reported an empty memory
+    // instead of an error. An unusable bound is now simply not applied.
+    const parse = (value) => {
+      if (!value) return null;
+      const t = new Date(value).getTime();
+      return Number.isFinite(t) ? t : null;
+    };
+    const start = parse(time_range.start) ?? -Infinity;
+    const end = parse(time_range.end) ?? Infinity;
     filtered = filtered.filter((obs) => {
       const t = new Date(obs.timestamp).getTime();
+      // Keep undateable records rather than dropping them invisibly.
+      if (!Number.isFinite(t)) return true;
       return t >= start && t <= end;
     });
   }
@@ -233,7 +305,7 @@ export async function importMemory(data) {
     await db.add(OBSERVATIONS_STORE, {
       content,
       source_url: typeof raw.source_url === "string" ? raw.source_url : null,
-      timestamp: typeof raw.timestamp === "string" ? raw.timestamp : new Date().toISOString(),
+      timestamp: coerceTimestamp(raw.timestamp),
       tags: Array.isArray(raw.tags) ? raw.tags.map((t) => sanitizeText(String(t))) : [],
       flagged: scanForInjection(content),
       embedding,
@@ -255,8 +327,8 @@ export async function importMemory(data) {
       entity1,
       entity2,
       relation: sanitizeText(String(raw.relation)),
-      confidence: typeof raw.confidence === "number" ? raw.confidence : 1,
-      timestamp: typeof raw.timestamp === "string" ? raw.timestamp : new Date().toISOString(),
+      confidence: coerceConfidence(raw.confidence),
+      timestamp: coerceTimestamp(raw.timestamp),
     });
     await tx.done;
     importedRelations++;

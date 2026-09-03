@@ -17,14 +17,37 @@ import {
 
 function formatTime(iso) {
   try {
-    return new Date(iso).toLocaleString(undefined, {
+    const date = new Date(iso);
+    // Show the year only when it is not the current one — otherwise a 2099
+    // or 2020 record is indistinguishable from something recorded today.
+    const sameYear = date.getFullYear() === new Date().getFullYear();
+    return date.toLocaleString(undefined, {
       month: "short",
       day: "numeric",
+      year: sameYear ? undefined : "numeric",
       hour: "2-digit",
       minute: "2-digit",
     });
   } catch {
     return iso;
+  }
+}
+
+/**
+ * Show where a source link actually goes.
+ *
+ * Observations are written by agents, so a link labelled only "source" asks
+ * the reader to trust an origin they cannot see. Showing the host puts the
+ * destination in front of them; anything unparseable (or a non-http scheme)
+ * is surfaced as-is rather than dressed up as a normal link.
+ */
+function sourceLabel(url) {
+  try {
+    const parsed = new URL(url);
+    if (parsed.protocol === "http:" || parsed.protocol === "https:") return parsed.hostname;
+    return parsed.protocol.replace(":", "") + " link";
+  } catch {
+    return "source";
   }
 }
 
@@ -416,12 +439,12 @@ export default function App() {
                     )}
                     <span className="item-time">{formatTime(o.timestamp)}</span>
                     {o.source_url && (
-                      <a href={o.source_url} target="_blank" rel="noreferrer">
-                        source
+                      <a href={o.source_url} target="_blank" rel="noreferrer" title={o.source_url}>
+                        {sourceLabel(o.source_url)}
                       </a>
                     )}
-                    {o.tags?.map((tag) => (
-                      <span className="chip" key={tag}>
+                    {o.tags?.map((tag, i) => (
+                      <span className="chip" key={`${tag}-${i}`}>
                         {tag}
                       </span>
                     ))}
