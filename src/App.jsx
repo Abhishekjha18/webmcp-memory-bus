@@ -40,8 +40,11 @@ export default function App() {
   }, []);
 
   useEffect(() => {
+    // WebMCP has no unregisterTool; an AbortSignal is the documented way to
+    // take tools back down, which StrictMode's double-mount in dev requires.
+    const controller = new AbortController();
     if (isWebMCPAvailable()) {
-      registerMemoryBusTools();
+      registerMemoryBusTools({ signal: controller.signal });
       setWebmcpStatus("available");
     } else {
       setWebmcpStatus("unavailable");
@@ -52,6 +55,7 @@ export default function App() {
       setActivity((prev) => [entry, ...prev].slice(0, 50))
     );
     return () => {
+      controller.abort();
       unsubMemory();
       unsubActivity();
     };

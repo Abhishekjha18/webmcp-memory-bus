@@ -32,9 +32,14 @@ function wrap(name, handler) {
   };
 }
 
+/**
+ * Chrome is mid-migration between the two namespaces. `document.modelContext`
+ * is the current spec surface; `navigator.modelContext` is the older name
+ * still shipping behind the flag in some builds, so it stays as a fallback.
+ */
 function getModelContext() {
-  if (typeof navigator !== "undefined" && navigator.modelContext) return navigator.modelContext;
   if (typeof document !== "undefined" && document.modelContext) return document.modelContext;
+  if (typeof navigator !== "undefined" && navigator.modelContext) return navigator.modelContext;
   return null;
 }
 
@@ -42,9 +47,23 @@ export function isWebMCPAvailable() {
   return Boolean(getModelContext());
 }
 
-export function registerMemoryBusTools() {
+/**
+ * Register all five tools.
+ *
+ * `signal` matters: the WebMCP spec has no `unregisterTool`, so an
+ * AbortSignal is the only way to take a tool back down. React 19 StrictMode
+ * double-invokes effects in development, and without this the second mount
+ * would register a duplicate set of tools.
+ *
+ * `exposedTo` is deliberately omitted. These tools mutate the user's own
+ * memory store; the default (agents interacting with this page) is the
+ * intended audience, and an allowlist here would only widen that.
+ */
+export function registerMemoryBusTools({ signal } = {}) {
   const modelContext = getModelContext();
   if (!modelContext) return false;
+
+  const options = signal ? { signal } : undefined;
 
   modelContext.registerTool({
     name: "store_observation",
@@ -61,7 +80,7 @@ export function registerMemoryBusTools() {
       required: ["content"],
     },
     execute: wrap("store_observation", storeObservation),
-  });
+  }, options);
 
   modelContext.registerTool({
     name: "retrieve_relevant",
@@ -77,7 +96,7 @@ export function registerMemoryBusTools() {
       required: ["query"],
     },
     execute: wrap("retrieve_relevant", retrieveRelevant),
-  });
+  }, options);
 
   modelContext.registerTool({
     name: "get_working_memory",
@@ -92,7 +111,7 @@ export function registerMemoryBusTools() {
       required: ["current_task"],
     },
     execute: wrap("get_working_memory", getWorkingMemory),
-  });
+  }, options);
 
   modelContext.registerTool({
     name: "link_concepts",
@@ -108,7 +127,7 @@ export function registerMemoryBusTools() {
       required: ["entity1", "entity2", "relation"],
     },
     execute: wrap("link_concepts", linkConcepts),
-  });
+  }, options);
 
   modelContext.registerTool({
     name: "summarize_context",
@@ -128,7 +147,7 @@ export function registerMemoryBusTools() {
       },
     },
     execute: wrap("summarize_context", summarizeContext),
-  });
+  }, options);
 
   return true;
 }
