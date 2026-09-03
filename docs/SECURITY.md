@@ -213,6 +213,51 @@ documented contract of pure semantic similarity.
 
 ---
 
+## 7. Superseding, and the stealth-suppression risk it opens
+
+`store_observation` accepts an optional `supersedes: <id>`, retiring an
+earlier observation without deleting it: the old record gains
+`supersededBy: <newId>`, `get_working_memory` demotes it by a flat 0.15×
+multiplier, and it stays visible in the UI, struck through and badged, for
+audit. `retrieve_relevant` does not demote it — same split as provenance,
+and for the same reason: pure similarity stays pure, and a caller checking
+`supersededBy` in the result gets the full signal either way.
+
+**The exposure this opens.** There is no delete tool, precisely so a planted
+memory can't talk an agent into destroying real ones (§1). Superseding is a
+second lever that reaches for the same effect without needing delete at all:
+an agent can call `store_observation` with content that contradicts a real
+memory and `supersedes` pointing at it, visually demoting — though not
+erasing — a note it dislikes. This is a genuine, not-fully-solved gap in the
+same family as the injection risk in §1.
+
+**What actually mitigates it.** Generalizing "agents write, only humans
+erase": an agent-authored call may not set `supersededBy` on a
+human-authored observation. Only a human-authored call — meaning
+`author: "human"`, which only the manual UI form can honestly assert — may
+supersede a human-authored one. An agent can still supersede another
+agent's or an imported observation's memory unchecked, which is the
+residual exposure: nothing stops one agent-sourced fact from demoting
+another. The old record is never destroyed, never hidden, and never
+prevented from being returned — an attentive human auditing the list still
+sees both the superseded note and the strike-through, which is why this is
+disclosed as a mitigated risk, not a solved one.
+
+**Verified end-to-end**, not just asserted: a real tool call attempting
+`author: agent` (the tool's forced default) superseding a human-authored
+observation is rejected — `supersedes` comes back `null` and the target's
+`supersededBy` is untouched — checked against the actual registered tool in
+a real browser, not a mock.
+
+**Import strips the relationship entirely.** `supersedes`/`supersededBy` in
+a raw import file are always discarded, never trusted — the same treatment
+`author` gets. This one is about correctness rather than trust: ids are
+reassigned on import, so a cross-reference from the file would point at a
+meaningless or coincidentally wrong id in the destination store, not a
+forgery risk to defend against.
+
+---
+
 ## What is deliberately not claimed
 
 - **That prompt injection is solved.** It is made visible and bounded. A planted
@@ -225,3 +270,6 @@ documented contract of pure semantic similarity.
 - **That real cross-process WebMCP invocation is verified.** The tool layer is
   tested against a mocked `modelContext`, which exercises the same code paths but
   not the browser's actual agent IPC. See [FEATURES.md](FEATURES.md).
+- **That superseding is abuse-proof.** One agent-sourced memory can still
+  demote another via `supersedes`, unchecked. Only a human-authored memory
+  is protected from that. See §7.

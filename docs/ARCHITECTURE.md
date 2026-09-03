@@ -84,20 +84,26 @@ and would re-do the work on every retrieval.
 
 ## Ranking
 
-`retrieve_relevant` is pure cosine similarity — no recency, no provenance.
-It exists for "find the closest match to this meaning," and blending in
-anything else would make that contract harder to reason about.
+`retrieve_relevant` is pure cosine similarity — no recency, no provenance, no
+supersede penalty. It exists for "find the closest match to this meaning,"
+and blending in anything else would make that contract harder to reason
+about. A superseded observation is still returned by it at full similarity;
+`supersededBy` is present in the result for a caller that wants to check.
 
-`get_working_memory` blends in recency and provenance, both as bounded
-multiplicative floors rather than additive terms, so each factor's maximum
-possible influence is a fixed, statable percentage:
+`get_working_memory` blends in recency, provenance, and superseding — the
+first two as bounded multiplicative floors, so each factor's maximum
+possible influence is a fixed, statable percentage; the third as a flat
+penalty, since it is not a preference dimension at all but a correctness
+one — a retracted fact should almost never win:
 
 ```js
-recencyWeight    = 0.5 ** (ageHours / 72)             // 72h half-life
-provenanceWeight = author === "human" ? 1 : 0
-score            = similarity
-                 * (0.7  + 0.3  * recencyWeight)      // up to ±30%
-                 * (0.95 + 0.05 * provenanceWeight)    // up to ±5%
+recencyWeight     = 0.5 ** (ageHours / 72)             // 72h half-life
+provenanceWeight  = author === "human" ? 1 : 0
+supersededPenalty = supersededBy != null ? 0.15 : 1
+score             = similarity
+                  * (0.7  + 0.3  * recencyWeight)      // up to ±30%
+                  * (0.95 + 0.05 * provenanceWeight)    // up to ±5%
+                  * supersededPenalty                   // flat 85% cut
 ```
 
 The `0.7 +` floor is the load-bearing part of recency: it can lift a result by
@@ -115,6 +121,15 @@ a barely-relevant human note still loses to a highly relevant agent-recorded
 one. See
 [SECURITY.md](SECURITY.md#6-provenance-and-the-humanagent-trust-boundary) for
 why `author` cannot be supplied by the caller in the first place.
+
+Superseding is deliberately not a bounded floor like the other two, because
+it is not answering "how relevant" or "how much to trust" — it is answering
+"is this still true." A flat multiplier says so plainly: 0.15, not a range
+that could still be argued about. The record is never deleted or hidden by
+this, only outranked; see
+[SECURITY.md](SECURITY.md#7-superseding-and-the-stealth-suppression-risk-it-opens)
+for why the write path that sets `supersededBy` is restricted the same way
+deletion is.
 
 ## Graph traversal
 

@@ -42,11 +42,14 @@ Record something read, decided, or noticed.
 | `source_url` | string | no | Where it came from. Stored as `null` if omitted. |
 | `timestamp` | string | no | ISO 8601. Defaults to now. Accepts backdating. |
 | `tags` | string[] | no | Free-form topic tags. Defaults to `[]`. |
+| `supersedes` | number | no | Id of an older observation this one retires. Silently ignored if the id doesn't exist, or if it would let an agent-authored call retire a human-authored memory. |
 
 Returns the stored record, including its assigned `id`, a `flagged` boolean,
-and `author: "agent"` — set unconditionally by the tool boundary itself, not
-by anything in the arguments. See
-[SECURITY.md](SECURITY.md#6-provenance-and-the-humanagent-trust-boundary).
+`author: "agent"` — set unconditionally by the tool boundary itself, not by
+anything in the arguments — and `supersedes`/`supersededBy` (both `null`
+unless a valid, allowed `supersedes` was given). See
+[SECURITY.md](SECURITY.md#6-provenance-and-the-humanagent-trust-boundary) and
+[§7](SECURITY.md#7-superseding-and-the-stealth-suppression-risk-it-opens).
 
 Hidden codepoints are stripped from `content` and `tags` before storage.
 Injection-shaped text is **flagged, not altered** — see
@@ -85,12 +88,14 @@ Relevant *and* recent observations for what is happening right now.
 | `current_task` | string | yes | What the caller is working on. |
 | `limit` | number | no | Default 5, hard-capped at 20. |
 
-Returns results carrying both `similarity` (pure cosine) and `score` (recency
-*and* provenance blended), so a caller can see how much each moved a result.
-The recency half-life is 72 hours; see
+Returns results carrying both `similarity` (pure cosine) and `score`
+(recency, provenance, *and* supersede status all blended), so a caller can
+see how much each moved a result. The recency half-life is 72 hours; see
 [ARCHITECTURE.md](ARCHITECTURE.md#ranking) for the formula, why the recency
-weight floors at 0.7 rather than decaying to zero, and why a human-authored
-memory gets only a 5% edge, not a dominant one.
+weight floors at 0.7 rather than decaying to zero, why a human-authored
+memory gets only a 5% edge, and why a superseded observation is cut to 15%
+of what it would otherwise score — still returned if nothing else is
+relevant, just very unlikely to rank first.
 
 Use this over `retrieve_relevant` when "what was I just doing" matters. Use
 `retrieve_relevant` when the age of a memory is irrelevant.

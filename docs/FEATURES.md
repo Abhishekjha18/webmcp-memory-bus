@@ -11,13 +11,16 @@ observed rather than when it got around to storing it.
 `Xenova/all-MiniLM-L6-v2` running in the tab and ranks by cosine similarity.
 No embedding API, no network call per query, no text leaves the machine.
 
-**Recency- and provenance-weighted working memory.** `get_working_memory` blends
-similarity with an exponential recency decay (72-hour half-life, floored at
-0.7) so "what was I just doing" outranks an equally relevant note from last
-year, plus a smaller provenance nudge (floored at 0.95) that breaks a
-near-tie in favor of something the user typed themselves. Neither factor can
-bury a genuinely more relevant memory — both are bounded floors, not
-overrides.
+**Recency-, provenance- and supersede-weighted working memory.**
+`get_working_memory` blends similarity with an exponential recency decay
+(72-hour half-life, floored at 0.7) so "what was I just doing" outranks an
+equally relevant note from last year, a smaller provenance nudge (floored at
+0.95) that breaks a near-tie in favor of something the user typed themselves,
+and a flat 0.15× cut for anything marked superseded. Recency and provenance
+can't bury a genuinely more relevant memory — both are bounded floors, not
+overrides — but the supersede cut is deliberately not bounded that way,
+since it isn't a preference, it's a correctness signal that a fact has been
+retracted.
 
 **Semantic concept graph.** `link_concepts` records typed, confidence-scored
 edges between entities in a store separate from the episodic log. Nodes are
@@ -56,6 +59,16 @@ tie-breaker, not an override. The field cannot be forged: an agent including
 `author: "human"` in a tool call is overridden at the boundary, and an import
 file's claimed authorship is discarded in favor of `imported`, unconditionally.
 
+**Superseding.** A new observation can retire an older one by id
+(`store_observation`'s `supersedes` parameter, or the ↻ button in the UI).
+The old record is never deleted — it stays in the list, struck through and
+badged `superseded`, for audit — but `get_working_memory` cuts its score by
+85%. Generalizes "agents write, only humans erase": an agent-authored call
+cannot supersede a human-authored memory, only another human-authored one
+can. It does not generalize the other direction — one agent-sourced memory
+can still supersede another unchecked, a disclosed, not fully closed, gap.
+See [SECURITY.md](SECURITY.md#7-superseding-and-the-stealth-suppression-risk-it-opens).
+
 **Export and import.** The whole store round-trips as a JSON file, so memory is
 portable across browsers and machines and survives clearing site data. Imports
 are treated as untrusted input: records are re-sanitized and re-flagged, and
@@ -65,8 +78,8 @@ appended rather than overwriting.
 arguments and result or error, rendered in the UI. Useful for watching an agent
 actually use the store, and the reason a failing tool call is diagnosable at all.
 
-**152 unit tests** across sanitization, store logic, graph traversal and the
-tool layer, plus a real-stack integration suite (12/12) that exercises the
+**169 unit tests** across sanitization, store logic, graph traversal and the
+tool layer, plus a real-stack integration suite (14/14) that exercises the
 actual embedding model and IndexedDB rather than mocks, gating deploy in CI.
 
 ---

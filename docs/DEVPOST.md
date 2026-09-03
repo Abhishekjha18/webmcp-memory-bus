@@ -73,6 +73,13 @@ including it in a tool call, the boundary overrides it regardless. Retrieval
 gives your own notes a small edge on a close call, never enough to bury a
 more relevant fact the agent recorded.
 
+**Retired facts stop getting acted on.** A memory that's out of date — "we
+use IndexedDB" superseded by "we migrated to OPFS" — used to be handed back
+with the same authority as the current one, and an agent had no signal that
+it had been retracted. Superseding an observation keeps it visible, struck
+through, for audit, but cuts its ranking so an agent working from
+`get_working_memory` stops confidently acting on what you already corrected.
+
 **It degrades gracefully.** The UI calls the memory layer directly rather than
 proxying through the tools, so the page is fully usable in a browser with no
 WebMCP support at all. The header states plainly whether tools registered.
@@ -162,10 +169,17 @@ Specifics worth calling out:
   arguments first and set `author: "agent"` after, so a forged
   `author: "human"` is overwritten rather than trusted. Verified end-to-end
   in a real browser, not just asserted in a unit test with a mock.
+- **Superseding generalizes the same asymmetry, not a new one.** An
+  agent-authored call may retire another agent-sourced or imported
+  observation, but never a human-authored one — closing the obvious way an
+  agent could stealth-suppress a real note without needing a delete tool at
+  all. It doesn't close every angle: one agent-sourced memory can still
+  supersede another unchecked, disclosed rather than hidden in
+  `docs/SECURITY.md`.
 
-**Verification.** 152 unit tests (Vitest + `fake-indexeddb`), a real-stack
+**Verification.** 169 unit tests (Vitest + `fake-indexeddb`), a real-stack
 integration suite that runs the actual tool registration path against the real
-transformers.js model and IndexedDB (12/12 passing), and repeated
+transformers.js model and IndexedDB (14/14 passing), and repeated
 headless-browser checks against both the dev server and the production build.
 Lint and tests gate deployment in CI. The threat model in `docs/SECURITY.md`
 states what is *not* claimed: with

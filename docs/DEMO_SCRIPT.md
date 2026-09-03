@@ -81,7 +81,7 @@ chose IndexedDB over localStorage because the embedding vectors are too big."*
 *On screen:* briefly scroll `src/lib/webmcpTools.js` — the `TOOL_SPECS` table
 with `annotations`, then the `registerTool(..., options)` call.
 
-> "152 unit tests and a real-stack integration suite (12/12 against the actual model and IndexedDB), gating deployment in CI."
+> "169 unit tests and a real-stack integration suite (14/14 against the actual model and IndexedDB), gating deployment in CI."
 
 ## 2:25–2:40 — Close
 
