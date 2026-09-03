@@ -163,6 +163,116 @@ export async function linkConcepts({ entity1, entity2, relation, confidence = 1 
   };
 }
 
+const DEFAULT_EXPLORE_DEPTH = 2;
+const MAX_EXPLORE_DEPTH = 4;
+// Caps the subgraph handed back to an agent — a glance at what's connected,
+// not a dump of the whole graph. Kept small enough that nodes + edges +
+// a handful of observations stay comfortably inside the tool output budget.
+const MAX_EXPLORE_NODES = 15;
+const MAX_EXPLORE_OBSERVATIONS = 5;
+
+function coerceDepth(depth) {
+  const n = Number(depth);
+  if (!Number.isFinite(n)) return DEFAULT_EXPLORE_DEPTH;
+  return Math.min(Math.max(Math.floor(n), 1), MAX_EXPLORE_DEPTH);
+}
+
+/**
+ * Resolve a caller-supplied entity name to how it is actually stored.
+ *
+ * Concept names are free text typed by agents and humans — "Postgres" and
+ * "postgres" are the same idea to a person but different keys in an
+ * exact-match store. An exact hit is tried first (a single indexed lookup);
+ * only on a miss does this fall back to scanning the concepts store for a
+ * case-insensitive match, which stays cheap because that store holds one
+ * row per distinct concept, not per observation.
+ */
+async function resolveConceptName(db, rawName) {
+  const exact = await db.get(CONCEPTS_STORE, rawName);
+  if (exact) return exact.name;
+  const needle = rawName.toLowerCase();
+  const all = await db.getAll(CONCEPTS_STORE);
+  const hit = all.find((c) => c.name.toLowerCase() === needle);
+  return hit ? hit.name : null;
+}
+
+/**
+ * Breadth-first walk of the concept graph outward from one entity.
+ *
+ * `link_concepts` and `summarize_context` are the only other places the
+ * graph is touched, and neither traverses it — summarize_context returns
+ * edges as a flat, unordered list. Without this, the "semantic concept
+ * graph" half of the dual-graph design records relationships but never
+ * uses them: deleting the graph entirely would not change what any other
+ * tool returns. This is what makes it load-bearing: "what do I know that's
+ * connected to X, and how" is a question pure similarity search cannot
+ * answer, because a connected fact may share no vocabulary with the query.
+ *
+ * Each hop queries the relations store's entity1/entity2 indexes directly —
+ * the first real use of either, both declared in db.js since the original
+ * schema but never queried until now.
+ *
+ * Observations bridge to the graph through their tags, the one existing
+ * free-text link between the episodic and semantic stores: an observation
+ * tagged "postgres" is treated as being about the concept node "postgres".
+ */
+export async function exploreConcepts({ entity, depth = DEFAULT_EXPLORE_DEPTH }) {
+  if (!entity || typeof entity !== "string") {
+    throw new Error("entity is required and must be a string");
+  }
+  const maxDepth = coerceDepth(depth);
+  const db = await getDB();
+  const cleanEntity = sanitizeText(entity);
+  const rootName = await resolveConceptName(db, cleanEntity);
+  if (!rootName) {
+    return { entity: cleanEntity, found: false, nodes: [], edges: [], observations: [] };
+  }
+
+  const distances = new Map([[rootName, 0]]);
+  const edgesSeen = new Map();
+  let frontier = [rootName];
+
+  for (
+    let hop = 1;
+    hop <= maxDepth && frontier.length > 0 && distances.size < MAX_EXPLORE_NODES;
+    hop++
+  ) {
+    const nextFrontier = [];
+    for (const name of frontier) {
+      const [asFirst, asSecond] = await Promise.all([
+        db.getAllFromIndex(RELATIONS_STORE, "entity1", name),
+        db.getAllFromIndex(RELATIONS_STORE, "entity2", name),
+      ]);
+      for (const rel of [...asFirst, ...asSecond]) {
+        edgesSeen.set(rel.id, rel);
+        const other = rel.entity1 === name ? rel.entity2 : rel.entity1;
+        if (!distances.has(other) && distances.size < MAX_EXPLORE_NODES) {
+          distances.set(other, hop);
+          nextFrontier.push(other);
+        }
+      }
+    }
+    frontier = nextFrontier;
+  }
+
+  const nodeNames = [...distances.keys()];
+  const nodeSet = new Set(nodeNames.map((n) => n.toLowerCase()));
+  const edges = [...edgesSeen.values()].map(({ id, ...rest }) => rest);
+  const observations = (await allObservations())
+    .filter((obs) => (obs.tags || []).some((t) => nodeSet.has(t.toLowerCase())))
+    .sort((a, b) => new Date(b.timestamp) - new Date(a.timestamp))
+    .slice(0, MAX_EXPLORE_OBSERVATIONS)
+    .map(({ embedding, ...rest }) => rest);
+
+  return {
+    entity: rootName,
+    found: true,
+    nodes: nodeNames.map((name) => ({ name, hops: distances.get(name) })),
+    edges,
+    observations,
+  };
+}
+
 export async function summarizeContext({ time_range, topic_filter }) {
   const observations = await allObservations();
   let filtered = observations;

@@ -47,6 +47,7 @@ const {
   deleteRelation,
   exportMemory,
   importMemory,
+  exploreConcepts,
 } = await import("./memoryStore");
 
 beforeEach(async () => {
@@ -500,5 +501,134 @@ describe("importMemory", () => {
     await expect(importMemory(null)).rejects.toThrow(/not valid JSON/);
     await expect(importMemory("nope")).rejects.toThrow(/not valid JSON/);
     await expect(importMemory({ version: 1 })).rejects.toThrow(/missing observations or relations/);
+  });
+});
+
+describe("exploreConcepts", () => {
+  it("returns found: false for an entity that was never linked", async () => {
+    const out = await exploreConcepts({ entity: "nonexistent-concept" });
+    expect(out).toEqual({
+      entity: "nonexistent-concept",
+      found: false,
+      nodes: [],
+      edges: [],
+      observations: [],
+    });
+  });
+
+  it("returns the root and its single neighbor for a minimal graph", async () => {
+    // Every concept enters the store via linkConcepts, which always creates
+    // one edge — so a concept with zero relations is not reachable through
+    // the public API. The smallest real graph is one edge, two nodes.
+    await linkConcepts({ entity1: "isolated", entity2: "also-isolated", relation: "r" });
+    const out = await exploreConcepts({ entity: "isolated", depth: 4 });
+    expect(out.found).toBe(true);
+    expect(out.nodes.map((n) => n.name).sort()).toEqual(["also-isolated", "isolated"]);
+  });
+
+  it("walks multiple hops and records hop distance", async () => {
+    await linkConcepts({ entity1: "postgres", entity2: "connection-pooling", relation: "requires" });
+    await linkConcepts({ entity1: "connection-pooling", entity2: "pgbouncer", relation: "implemented-by" });
+    await linkConcepts({ entity1: "pgbouncer", entity2: "transaction-mode", relation: "defaults-to" });
+
+    const out = await exploreConcepts({ entity: "postgres", depth: 3 });
+    const byName = Object.fromEntries(out.nodes.map((n) => [n.name, n.hops]));
+    expect(byName.postgres).toBe(0);
+    expect(byName["connection-pooling"]).toBe(1);
+    expect(byName.pgbouncer).toBe(2);
+    expect(byName["transaction-mode"]).toBe(3);
+  });
+
+  it("stops at the requested depth", async () => {
+    await linkConcepts({ entity1: "a", entity2: "b", relation: "r" });
+    await linkConcepts({ entity1: "b", entity2: "c", relation: "r" });
+    await linkConcepts({ entity1: "c", entity2: "d", relation: "r" });
+
+    const out = await exploreConcepts({ entity: "a", depth: 1 });
+    const names = out.nodes.map((n) => n.name).sort();
+    expect(names).toEqual(["a", "b"]);
+  });
+
+  it("defaults to depth 2 when no depth is given", async () => {
+    await linkConcepts({ entity1: "a", entity2: "b", relation: "r" });
+    await linkConcepts({ entity1: "b", entity2: "c", relation: "r" });
+    await linkConcepts({ entity1: "c", entity2: "d", relation: "r" });
+
+    const names = (await exploreConcepts({ entity: "a" })).nodes.map((n) => n.name).sort();
+    expect(names).toEqual(["a", "b", "c"]);
+  });
+
+  it("clamps an oversized or invalid depth rather than throwing", async () => {
+    await linkConcepts({ entity1: "a", entity2: "b", relation: "r" });
+    await expect(exploreConcepts({ entity: "a", depth: 999 })).resolves.toMatchObject({ found: true });
+    await expect(exploreConcepts({ entity: "a", depth: "not a number" })).resolves.toMatchObject({
+      found: true,
+    });
+  });
+
+  it("does not revisit a node reached by a shorter path (no infinite loop on a cycle)", async () => {
+    await linkConcepts({ entity1: "a", entity2: "b", relation: "r" });
+    await linkConcepts({ entity1: "b", entity2: "c", relation: "r" });
+    await linkConcepts({ entity1: "c", entity2: "a", relation: "r" }); // closes the cycle
+    const out = await exploreConcepts({ entity: "a", depth: 4 });
+    expect(out.nodes).toHaveLength(3);
+    expect(out.nodes.find((n) => n.name === "a").hops).toBe(0);
+  });
+
+  it("deduplicates an edge reachable from both of its endpoints", async () => {
+    await linkConcepts({ entity1: "a", entity2: "b", relation: "connects" });
+    const out = await exploreConcepts({ entity: "a", depth: 2 });
+    expect(out.edges).toHaveLength(1);
+    expect(out.edges[0]).toMatchObject({ entity1: "a", entity2: "b", relation: "connects" });
+  });
+
+  it("resolves a case-insensitive match against the stored concept name", async () => {
+    await linkConcepts({ entity1: "Postgres", entity2: "SQL", relation: "is-a" });
+    const out = await exploreConcepts({ entity: "postgres" });
+    expect(out.found).toBe(true);
+    expect(out.entity).toBe("Postgres"); // resolved to the actual stored casing
+  });
+
+  it("bridges to observations through matching tags", async () => {
+    await linkConcepts({ entity1: "postgres", entity2: "backups", relation: "needs" });
+    await storeObservation({ content: "pg_dump nightly at 2am", tags: ["postgres"] });
+    await storeObservation({ content: "unrelated note", tags: ["something-else"] });
+    const out = await exploreConcepts({ entity: "postgres" });
+    expect(out.observations).toHaveLength(1);
+    expect(out.observations[0].content).toBe("pg_dump nightly at 2am");
+  });
+
+  it("matches tags case-insensitively against graph node names", async () => {
+    await linkConcepts({ entity1: "postgres", entity2: "backups", relation: "needs" });
+    await storeObservation({ content: "tagged with different casing", tags: ["Postgres"] });
+    const out = await exploreConcepts({ entity: "postgres" });
+    expect(out.observations.map((o) => o.content)).toContain("tagged with different casing");
+  });
+
+  it("never returns embeddings on bridged observations", async () => {
+    await linkConcepts({ entity1: "postgres", entity2: "backups", relation: "needs" });
+    await storeObservation({ content: "x", tags: ["postgres"] });
+    const out = await exploreConcepts({ entity: "postgres" });
+    expect(out.observations[0].embedding).toBeUndefined();
+  });
+
+  it("caps the number of bridged observations returned", async () => {
+    await linkConcepts({ entity1: "postgres", entity2: "backups", relation: "needs" });
+    for (let i = 0; i < 10; i++) {
+      await storeObservation({ content: `note ${i}`, tags: ["postgres"] });
+    }
+    const out = await exploreConcepts({ entity: "postgres" });
+    expect(out.observations.length).toBeLessThanOrEqual(5);
+  });
+
+  it("rejects a missing entity", async () => {
+    await expect(exploreConcepts({})).rejects.toThrow(/entity is required/);
+  });
+
+  it("strips hidden codepoints from the queried entity before lookup", async () => {
+    await linkConcepts({ entity1: "postgres", entity2: "backups", relation: "needs" });
+    const out = await exploreConcepts({ entity: "post\u200bgres" });
+    expect(out.found).toBe(true);
+    expect(out.entity).toBe("postgres");
   });
 });
