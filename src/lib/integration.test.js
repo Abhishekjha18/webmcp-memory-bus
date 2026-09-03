@@ -138,4 +138,27 @@ describe.skipIf(!run)("integration: real tools, real embeddings", () => {
     const out = await call("explore_concepts", { entity: "a concept nobody ever recorded" });
     expect(out).toMatchObject({ found: false, nodes: [], edges: [], observations: [] });
   });
+
+  it("supersedes an observation through the real tool, and down-weights it in real ranking", async () => {
+    const original = await call("store_observation", { content: "the deploy runbook lives in the wiki" });
+    const replacement = await call("store_observation", {
+      content: "the deploy runbook lives in the wiki",
+      supersedes: original.id,
+    });
+    expect(replacement.supersedes).toBe(original.id);
+
+    const wm = await call("get_working_memory", { current_task: "where is the deploy runbook" });
+    const supersededResult = wm.find((r) => r.id === original.id);
+    const replacementResult = wm.find((r) => r.id === replacement.id);
+    expect(supersededResult.score).toBeLessThan(replacementResult.score);
+  }, 120_000);
+
+  it("blocks a real agent-authored tool call from superseding a human-authored observation", async () => {
+    const humanNote = await store.storeObservation({ content: "human wrote this directly", author: "human" });
+    const attempt = await call("store_observation", {
+      content: "agent trying to retire it",
+      supersedes: humanNote.id,
+    });
+    expect(attempt.supersedes).toBeNull();
+  });
 });
