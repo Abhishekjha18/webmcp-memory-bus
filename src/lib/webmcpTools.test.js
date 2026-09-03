@@ -16,7 +16,16 @@ vi.mock("./memoryStore", () => ({
   })),
 }));
 
-const { registerMemoryBusTools, isWebMCPAvailable } = await import("./webmcpTools");
+const {
+  registerMemoryBusTools,
+  isWebMCPAvailable,
+  onToolActivity,
+  checkToolBudgets,
+  TOOL_BUDGETS,
+  TOOL_SPECS,
+} = await import("./webmcpTools");
+
+const { storeObservation } = await import("./memoryStore");
 
 function makeModelContext() {
   const registered = new Map();
@@ -112,5 +121,147 @@ describe("registerMemoryBusTools", () => {
       expect(spec.inputSchema.type).toBe("object");
       expect(typeof spec.execute).toBe("function");
     }
+  });
+});
+
+describe("tool annotations", () => {
+  beforeEach(() => {
+    globalThis.document = { modelContext: makeModelContext() };
+  });
+
+  it("marks the three read tools readOnlyHint and the two writers not", () => {
+    const byName = Object.fromEntries(TOOL_SPECS.map((s) => [s.name, s.annotations]));
+    expect(byName.retrieve_relevant.readOnlyHint).toBe(true);
+    expect(byName.get_working_memory.readOnlyHint).toBe(true);
+    expect(byName.summarize_context.readOnlyHint).toBe(true);
+    expect(byName.store_observation.readOnlyHint).toBe(false);
+    expect(byName.link_concepts.readOnlyHint).toBe(false);
+  });
+
+  it("marks every tool that replays stored text as untrustedContentHint", () => {
+    // This is the injection-relevant annotation: any tool whose output can
+    // carry text an agent did not write must declare it.
+    const byName = Object.fromEntries(TOOL_SPECS.map((s) => [s.name, s.annotations]));
+    expect(byName.retrieve_relevant.untrustedContentHint).toBe(true);
+    expect(byName.get_working_memory.untrustedContentHint).toBe(true);
+    expect(byName.summarize_context.untrustedContentHint).toBe(true);
+    expect(byName.store_observation.untrustedContentHint).toBe(false);
+    expect(byName.link_concepts.untrustedContentHint).toBe(false);
+  });
+
+  it("declares annotations on every registered tool", () => {
+    registerMemoryBusTools();
+    for (const spec of TOOL_SPECS) {
+      expect(spec.annotations).toBeDefined();
+      expect(typeof spec.annotations.readOnlyHint).toBe("boolean");
+      expect(typeof spec.annotations.untrustedContentHint).toBe("boolean");
+    }
+  });
+});
+
+describe("checkToolBudgets", () => {
+  it("finds no violations in the shipped tool set", () => {
+    expect(checkToolBudgets()).toEqual([]);
+  });
+
+  it("catches an over-long tool name", () => {
+    const violations = checkToolBudgets([
+      { name: "x".repeat(TOOL_BUDGETS.name + 1), description: "d", inputSchema: {} },
+    ]);
+    expect(violations).toHaveLength(1);
+    expect(violations[0]).toMatch(/name is/);
+  });
+
+  it("catches an over-long description", () => {
+    const violations = checkToolBudgets([
+      { name: "ok", description: "d".repeat(TOOL_BUDGETS.description + 1), inputSchema: {} },
+    ]);
+    expect(violations[0]).toMatch(/description is/);
+  });
+
+  it("catches an over-long parameter description", () => {
+    const violations = checkToolBudgets([
+      {
+        name: "ok",
+        description: "d",
+        inputSchema: {
+          properties: { p: { description: "p".repeat(TOOL_BUDGETS.paramDescription + 1) } },
+        },
+      },
+    ]);
+    expect(violations[0]).toMatch(/ok\.p: description is/);
+  });
+
+  it("does not throw when a schema has no properties", () => {
+    expect(checkToolBudgets([{ name: "ok", description: "d", inputSchema: {} }])).toEqual([]);
+  });
+});
+
+describe("activity logging", () => {
+  let ctx;
+
+  beforeEach(() => {
+    ctx = makeModelContext();
+    globalThis.document = { modelContext: ctx };
+    registerMemoryBusTools();
+  });
+
+  it("logs a successful call with its args and result", async () => {
+    const events = [];
+    const unsub = onToolActivity((e) => events.push(e));
+    await ctx.registered.get("store_observation").spec.execute({ content: "hi" });
+    unsub();
+    expect(events).toHaveLength(1);
+    expect(events[0]).toMatchObject({ name: "store_observation", ok: true });
+    expect(events[0].args).toEqual({ content: "hi" });
+    expect(events[0].at).toMatch(/^\d{4}-\d{2}-\d{2}T/);
+  });
+
+  it("logs a failure and rethrows so the agent sees the error", async () => {
+    storeObservation.mockRejectedValueOnce(new Error("content is required"));
+    const events = [];
+    const unsub = onToolActivity((e) => events.push(e));
+    await expect(
+      ctx.registered.get("store_observation").spec.execute({}),
+    ).rejects.toThrow("content is required");
+    unsub();
+    expect(events[0]).toMatchObject({ ok: false, error: "content is required" });
+  });
+
+  it("stringifies a non-Error rejection rather than logging undefined", async () => {
+    storeObservation.mockRejectedValueOnce("plain string failure");
+    const events = [];
+    const unsub = onToolActivity((e) => events.push(e));
+    await expect(ctx.registered.get("store_observation").spec.execute({})).rejects.toBeTruthy();
+    unsub();
+    expect(events[0].error).toBe("plain string failure");
+  });
+
+  it("defaults missing args to an empty object", async () => {
+    await ctx.registered.get("store_observation").spec.execute();
+    expect(storeObservation).toHaveBeenCalledWith({});
+  });
+
+  it("stops delivering events after unsubscribe", async () => {
+    const events = [];
+    onToolActivity((e) => events.push(e))();
+    await ctx.registered.get("store_observation").spec.execute({ content: "hi" });
+    expect(events).toHaveLength(0);
+  });
+
+  it("delivers to multiple subscribers", async () => {
+    const a = [];
+    const b = [];
+    const unsubA = onToolActivity((e) => a.push(e));
+    const unsubB = onToolActivity((e) => b.push(e));
+    await ctx.registered.get("link_concepts").spec.execute({
+      entity1: "x",
+      entity2: "y",
+      relation: "r",
+    });
+    unsubA();
+    unsubB();
+    expect(a).toHaveLength(1);
+    expect(b).toHaveLength(1);
   });
 });

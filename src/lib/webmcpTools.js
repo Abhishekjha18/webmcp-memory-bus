@@ -33,6 +33,19 @@ function wrap(name, handler) {
 }
 
 /**
+ * Chrome's provisional budgets for agent-facing tool text. Oversized tool
+ * metadata and outputs measurably degrade an agent's ability to hold onto
+ * its own instructions, which is exactly the failure mode injection
+ * defenses depend on not happening.
+ */
+export const TOOL_BUDGETS = {
+  name: 30,
+  description: 500,
+  paramDescription: 150,
+  output: 1500,
+};
+
+/**
  * Chrome is mid-migration between the two namespaces. `document.modelContext`
  * is the current spec surface; `navigator.modelContext` is the older name
  * still shipping behind the flag in some builds, so it stays as a fallback.
@@ -46,6 +59,134 @@ function getModelContext() {
 export function isWebMCPAvailable() {
   return Boolean(getModelContext());
 }
+
+const TOOL_SPECS = [
+  {
+    name: "store_observation",
+    description:
+      "Store an observation (something read, decided, or noticed) into persistent browser-local memory, tagged with its source and time.",
+    annotations: { readOnlyHint: false, untrustedContentHint: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        content: { type: "string", description: "The text of the observation." },
+        source_url: { type: "string", description: "URL the observation came from." },
+        timestamp: { type: "string", description: "ISO timestamp; defaults to now." },
+        tags: {
+          type: "array",
+          items: { type: "string" },
+          description: "Free-form topic tags.",
+        },
+      },
+      required: ["content"],
+    },
+    handler: storeObservation,
+  },
+  {
+    name: "retrieve_relevant",
+    description:
+      "Semantic search over stored observations. Returns observations most similar in meaning to the query.",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        query: { type: "string", description: "What to search memory for." },
+        task_context: {
+          type: "string",
+          description: "Extra context about the current task, to bias the search.",
+        },
+        limit: { type: "number", description: "Max results (default 5, max 20)." },
+      },
+      required: ["query"],
+    },
+    handler: retrieveRelevant,
+  },
+  {
+    name: "get_working_memory",
+    description:
+      "Relevant plus recent observations for what is happening right now, blending semantic similarity with recency.",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        current_task: { type: "string", description: "What the caller is working on now." },
+        limit: { type: "number", description: "Max results (default 5, max 20)." },
+      },
+      required: ["current_task"],
+    },
+    handler: getWorkingMemory,
+  },
+  {
+    name: "link_concepts",
+    description:
+      "Record a relation between two concepts/entities in the semantic memory graph.",
+    annotations: { readOnlyHint: false, untrustedContentHint: false },
+    inputSchema: {
+      type: "object",
+      properties: {
+        entity1: { type: "string", description: "First entity name." },
+        entity2: { type: "string", description: "Second entity name." },
+        relation: {
+          type: "string",
+          description: "How entity1 relates to entity2, e.g. 'causes', 'is a', 'blocks'.",
+        },
+        confidence: { type: "number", description: "0-1 confidence score." },
+      },
+      required: ["entity1", "entity2", "relation"],
+    },
+    handler: linkConcepts,
+  },
+  {
+    name: "summarize_context",
+    description:
+      "Retrieve stored observations and concept links filtered by time range and/or topic, for the caller to summarize.",
+    annotations: { readOnlyHint: true, untrustedContentHint: true },
+    inputSchema: {
+      type: "object",
+      properties: {
+        time_range: {
+          type: "object",
+          properties: {
+            start: { type: "string", description: "ISO date/time." },
+            end: { type: "string", description: "ISO date/time." },
+          },
+        },
+        topic_filter: { type: "string", description: "Keyword or tag to filter by." },
+      },
+    },
+    handler: summarizeContext,
+  },
+];
+
+/**
+ * Validate every tool's agent-facing text against the budgets. Returns the
+ * list of violations rather than throwing, so a budget regression surfaces
+ * in tests and in the console without taking the page down.
+ */
+export function checkToolBudgets(specs = TOOL_SPECS) {
+  const violations = [];
+  for (const spec of specs) {
+    if (spec.name.length > TOOL_BUDGETS.name) {
+      violations.push(`${spec.name}: name is ${spec.name.length} chars (max ${TOOL_BUDGETS.name})`);
+    }
+    if (spec.description.length > TOOL_BUDGETS.description) {
+      violations.push(
+        `${spec.name}: description is ${spec.description.length} chars (max ${TOOL_BUDGETS.description})`,
+      );
+    }
+    for (const [param, schema] of Object.entries(spec.inputSchema.properties || {})) {
+      const desc = schema.description;
+      if (desc && desc.length > TOOL_BUDGETS.paramDescription) {
+        violations.push(
+          `${spec.name}.${param}: description is ${desc.length} chars (max ${TOOL_BUDGETS.paramDescription})`,
+        );
+      }
+    }
+  }
+  return violations;
+}
+
+export { TOOL_SPECS };
 
 /**
  * Register all five tools.
@@ -63,91 +204,23 @@ export function registerMemoryBusTools({ signal } = {}) {
   const modelContext = getModelContext();
   if (!modelContext) return false;
 
+  const violations = checkToolBudgets();
+  if (violations.length > 0) {
+    console.warn("[memory-bus] tool text budget violations:", violations);
+  }
+
   const options = signal ? { signal } : undefined;
-
-  modelContext.registerTool({
-    name: "store_observation",
-    description:
-      "Store an observation (something read, decided, or noticed) into persistent browser-local memory, tagged with its source and time.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        content: { type: "string", description: "The text of the observation." },
-        source_url: { type: "string", description: "URL the observation came from." },
-        timestamp: { type: "string", description: "ISO timestamp; defaults to now." },
-        tags: { type: "array", items: { type: "string" }, description: "Free-form topic tags." },
+  for (const { name, description, annotations, inputSchema, handler } of TOOL_SPECS) {
+    modelContext.registerTool(
+      {
+        name,
+        description,
+        annotations,
+        inputSchema,
+        execute: wrap(name, handler),
       },
-      required: ["content"],
-    },
-    execute: wrap("store_observation", storeObservation),
-  }, options);
-
-  modelContext.registerTool({
-    name: "retrieve_relevant",
-    description:
-      "Semantic search over stored observations. Returns the observations most similar in meaning to the query.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        query: { type: "string", description: "What to search for." },
-        task_context: { type: "string", description: "Extra context about the current task to bias retrieval." },
-        limit: { type: "number", description: "Max results (default 5)." },
-      },
-      required: ["query"],
-    },
-    execute: wrap("retrieve_relevant", retrieveRelevant),
-  }, options);
-
-  modelContext.registerTool({
-    name: "get_working_memory",
-    description:
-      "Returns the most relevant recent observations for a current task, blending semantic similarity with recency.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        current_task: { type: "string", description: "Description of what the user/agent is doing right now." },
-        limit: { type: "number", description: "Max results (default 5)." },
-      },
-      required: ["current_task"],
-    },
-    execute: wrap("get_working_memory", getWorkingMemory),
-  }, options);
-
-  modelContext.registerTool({
-    name: "link_concepts",
-    description: "Record a relation between two concepts/entities in the semantic memory graph.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        entity1: { type: "string" },
-        entity2: { type: "string" },
-        relation: { type: "string", description: "How entity1 relates to entity2, e.g. 'causes', 'is a', 'blocks'." },
-        confidence: { type: "number", description: "0-1 confidence score." },
-      },
-      required: ["entity1", "entity2", "relation"],
-    },
-    execute: wrap("link_concepts", linkConcepts),
-  }, options);
-
-  modelContext.registerTool({
-    name: "summarize_context",
-    description:
-      "Retrieve stored observations and concept links filtered by a time range and/or topic, for the caller to summarize.",
-    inputSchema: {
-      type: "object",
-      properties: {
-        time_range: {
-          type: "object",
-          properties: {
-            start: { type: "string", description: "ISO date/time." },
-            end: { type: "string", description: "ISO date/time." },
-          },
-        },
-        topic_filter: { type: "string", description: "Keyword or tag to filter by." },
-      },
-    },
-    execute: wrap("summarize_context", summarizeContext),
-  }, options);
-
+      options,
+    );
+  }
   return true;
 }
