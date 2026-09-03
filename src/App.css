@@ -177,6 +177,80 @@ ul {
   cursor: help;
 }
 
+.model-progress {
+  margin: 0 0 16px;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  background: var(--panel);
+}
+
+.model-progress-label {
+  font-size: 0.8rem;
+  color: var(--muted);
+  margin-bottom: 8px;
+}
+
+.model-progress-track {
+  height: 6px;
+  border-radius: 3px;
+  background: var(--border);
+  overflow: hidden;
+}
+
+.model-progress-bar {
+  height: 100%;
+  background: var(--accent);
+  transition: width 0.2s ease;
+}
+
+.panel-actions {
+  display: flex;
+  gap: 8px;
+}
+
+.transfer-note {
+  font-size: 0.75rem;
+  color: var(--muted);
+  margin: 0 0 8px;
+}
+
+/* Per-item delete. Deliberately human-only: there is no agent tool that
+   removes memories, so a planted observation cannot instruct an agent to
+   erase the real ones. */
+.obs-list li {
+  position: relative;
+  padding-right: 28px;
+}
+
+.delete-item {
+  position: absolute;
+  top: 6px;
+  right: 4px;
+  width: 20px;
+  height: 20px;
+  padding: 0;
+  line-height: 1;
+  font-size: 0.95rem;
+  border: none;
+  border-radius: 4px;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  opacity: 0;
+  transition: opacity 0.15s ease, color 0.15s ease;
+}
+
+.obs-list li:hover .delete-item,
+.delete-item:focus-visible {
+  opacity: 1;
+}
+
+.delete-item:hover {
+  color: #e5484d;
+  background: var(--border);
+}
+
 .score {
   color: var(--accent);
   font-variant-numeric: tabular-nums;

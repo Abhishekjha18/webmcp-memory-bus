@@ -1,6 +1,7 @@
-import { useEffect, useState, useCallback } from "react";
+import { useEffect, useState, useCallback, useRef } from "react";
 import "./App.css";
 import { registerMemoryBusTools, isWebMCPAvailable, onToolActivity } from "./lib/webmcpTools";
+import { onModelProgress } from "./lib/embeddings";
 import {
   storeObservation,
   retrieveRelevant,
@@ -8,6 +9,10 @@ import {
   getAllObservationsForUI,
   getAllRelationsForUI,
   clearAllMemory,
+  deleteObservation,
+  deleteRelation,
+  exportMemory,
+  importMemory,
 } from "./lib/memoryStore";
 
 function formatTime(iso) {
@@ -33,6 +38,10 @@ export default function App() {
   const [searchResults, setSearchResults] = useState(null);
   const [searching, setSearching] = useState(false);
 
+  const [modelProgress, setModelProgress] = useState(null);
+  const [transferNote, setTransferNote] = useState("");
+  const fileInputRef = useRef(null);
+
   const refresh = useCallback(async () => {
     const [obs, rels] = await Promise.all([getAllObservationsForUI(), getAllRelationsForUI()]);
     setObservations(obs);
@@ -54,10 +63,16 @@ export default function App() {
     const unsubActivity = onToolActivity((entry) =>
       setActivity((prev) => [entry, ...prev].slice(0, 50))
     );
+    // The ~25MB model downloads on the first embed, so without this the first
+    // store or search looks like a hung button on a cold profile.
+    const unsubProgress = onModelProgress((state) =>
+      setModelProgress(state.status === "ready" ? null : state)
+    );
     return () => {
       controller.abort();
       unsubMemory();
       unsubActivity();
+      unsubProgress();
     };
   }, [refresh]);
 
@@ -91,6 +106,37 @@ export default function App() {
     setSearchResults(null);
   }
 
+  async function handleExport() {
+    const dump = await exportMemory();
+    const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = `agent-memory-${new Date().toISOString().slice(0, 10)}.json`;
+    a.click();
+    URL.revokeObjectURL(url);
+    setTransferNote(
+      `Exported ${dump.observations.length} observations and ${dump.relations.length} concept links.`,
+    );
+  }
+
+  async function handleImportFile(e) {
+    const file = e.target.files?.[0];
+    if (!file) return;
+    try {
+      const result = await importMemory(JSON.parse(await file.text()));
+      setTransferNote(
+        `Imported ${result.observations} observations and ${result.relations} concept links` +
+          (result.skipped ? `, skipped ${result.skipped} malformed records.` : "."),
+      );
+    } catch (err) {
+      setTransferNote(`Import failed: ${err.message}`);
+    } finally {
+      // Reset so re-picking the same file fires change again.
+      e.target.value = "";
+    }
+  }
+
   async function handleSearch(e) {
     e.preventDefault();
     if (!query.trim()) return;
@@ -116,6 +162,21 @@ export default function App() {
           {webmcpStatus === "checking" && "Checking WebMCP..."}
         </span>
       </header>
+
+      {modelProgress && (
+        <div className="model-progress" role="status">
+          <div className="model-progress-label">
+            {modelProgress.status === "error"
+              ? `Embedding model failed to load: ${modelProgress.error}`
+              : `Downloading embedding model (runs locally, once) — ${modelProgress.percent}%`}
+          </div>
+          {modelProgress.status !== "error" && (
+            <div className="model-progress-track">
+              <div className="model-progress-bar" style={{ width: `${modelProgress.percent}%` }} />
+            </div>
+          )}
+        </div>
+      )}
 
       <main className="grid">
         <section className="panel">
@@ -195,14 +256,38 @@ export default function App() {
         <section className="panel">
           <div className="panel-header">
             <h2>Stored observations ({observations.length})</h2>
-            <button className="ghost" onClick={handleClearAll}>
-              Clear all
-            </button>
+            <div className="panel-actions">
+              <button className="ghost" onClick={handleExport}>
+                Export
+              </button>
+              <button className="ghost" onClick={() => fileInputRef.current?.click()}>
+                Import
+              </button>
+              <input
+                ref={fileInputRef}
+                type="file"
+                accept="application/json,.json"
+                onChange={handleImportFile}
+                hidden
+              />
+              <button className="ghost" onClick={handleClearAll}>
+                Clear all
+              </button>
+            </div>
           </div>
+          {transferNote && <p className="transfer-note">{transferNote}</p>}
           <ul className="obs-list">
             {observations.length === 0 && <li className="empty">Nothing stored yet.</li>}
             {observations.map((o) => (
               <li key={o.id}>
+                <button
+                  className="delete-item"
+                  onClick={() => deleteObservation(o.id)}
+                  title="Delete this observation"
+                  aria-label="Delete this observation"
+                >
+                  ×
+                </button>
                 <div className="obs-content">{o.content}</div>
                 <div className="obs-meta">
                   {o.flagged && (
@@ -238,6 +323,14 @@ export default function App() {
             {relations.length === 0 && <li className="empty">No links recorded yet.</li>}
             {relations.map((r) => (
               <li key={r.id}>
+                <button
+                  className="delete-item"
+                  onClick={() => deleteRelation(r.id)}
+                  title="Delete this concept link"
+                  aria-label="Delete this concept link"
+                >
+                  ×
+                </button>
                 <div className="obs-content">
                   <strong>{r.entity1}</strong> —{r.relation}→ <strong>{r.entity2}</strong>
                 </div>
