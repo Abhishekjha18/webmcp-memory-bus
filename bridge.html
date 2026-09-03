@@ -26,6 +26,7 @@
         linkConcepts,
         summarizeContext,
         exploreConcepts,
+        AUTHORS,
       } from "./src/lib/memoryStore.js";
       import { untrustedEnvelope, boundOutput } from "./src/lib/sanitize.js";
 
@@ -43,7 +44,11 @@
         }));
 
       const handlers = {
-        store_observation: (args) => storeObservation(args),
+        // author is not a documented tool parameter, but nothing stops a
+        // caller from including it anyway — spreading args first and
+        // overriding after means a forged author: "human" is discarded
+        // rather than believed, matching webmcpTools.js's own tool wrapper.
+        store_observation: (args) => storeObservation({ ...args, author: AUTHORS.AGENT }),
         retrieve_relevant: async (args) => shield(await retrieveRelevant(args)),
         get_working_memory: async (args) => shield(await getWorkingMemory(args)),
         link_concepts: (args) => linkConcepts(args),
