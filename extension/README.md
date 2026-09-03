@@ -6,7 +6,7 @@ is invisible from `github.com` — an agent helping you review a PR cannot reach
 what you recorded yesterday unless you send it to the Memory Bus tab first.
 
 This extension removes that limitation without changing what the standard
-allows: it registers the same five tools on **every** page you visit, so
+allows: it registers the same six tools on **every** page you visit, so
 whatever page the agent is on already offers them.
 
 ## The store stays in one place
@@ -20,7 +20,7 @@ All sanitisation, injection flagging, untrusted-content envelopes and limit
 clamping stay in the app's modules. The extension is transport only.
 
 ```
-page (MAIN world)      register-tools.js   registers the 5 tools
+page (MAIN world)      register-tools.js   registers the 6 tools
       ↓ postMessage
 content script         relay.js            has chrome.* APIs
       ↓ sendMessage
@@ -50,7 +50,7 @@ same as the site.
 
 1. Open any site — `github.com` is the interesting one
 2. Open the Model Context Tool Inspector on that tab
-3. The five memory tools should now be listed **on that page**, where before
+3. The six memory tools should now be listed **on that page**, where before
    there were none
 4. Execute `store_observation`; it is captured with that page's URL as its
    source

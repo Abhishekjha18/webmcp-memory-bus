@@ -95,19 +95,41 @@ retrieve_relevant
   -> content: "<untrusted-user-content>...</untrusted-user-content>"
 ```
 
+**A note on `explore_concepts`'s tag bridge.** The other three retrieval tools
+surface an observation because it is semantically similar or matches a filter.
+`explore_concepts` surfaces one because it shares a **tag**, an exact string
+match with no relevance ranking at all. An agent that tags an unrelated
+observation with a popular concept name (`"postgres"`, say) gets that
+observation returned whenever anyone explores that concept — the same class of
+exposure `topic_filter` already has in `summarize_context`, not a new
+vulnerability, but worth naming since it is a second exact-match surface rather
+than a ranked one. The same layers 3–7 above still apply to what comes back.
+
 ---
 
 ## 2. Cross-tool and cross-origin reach
 
 `registerTool` is called **without `exposedTo`**. These tools mutate the user's
 own memory; the default audience — an agent interacting with this page — is the
-intended one, and an allowlist could only widen it. There is no path by which
-another origin's agent reaches this database without the user opening this page.
+intended one, and an allowlist could only widen it.
 
-WebMCP scopes registered tools to the registering tab. An agent must actually be
-working with this tab to call them; they are not ambiently reachable from every
-other open tab. This is a real limitation as much as a control — see
-[FEATURES.md](FEATURES.md).
+**Without the companion extension**, there is no path by which another
+origin's agent reaches this database without the user opening this page.
+WebMCP scopes registered tools to the registering tab, so they are not
+ambiently reachable from every other open tab — a real limitation as much as a
+control; see [FEATURES.md](FEATURES.md).
+
+**With the companion extension installed** (`extension/`, opt-in, not part of
+the live site), that scoping is deliberately lifted: the same tools register on
+every page the user visits, so an agent working on any origin can reach this
+memory. The extension holds no memory of its own — calls are relayed through an
+offscreen document into a same-origin bridge page, so they land in the same
+IndexedDB the site itself shows, not a second copy. The bridge accepts messages
+**only from a `chrome-extension://` origin**; a website cannot frame the bridge
+and drive the store itself, because the origin check happens before any
+handler runs. The user opting into the extension is the trust boundary here, in
+the same way installing any browser extension is — this is disclosed, not
+hidden, and the extension is a separate install a judge must add deliberately.
 
 ---
 

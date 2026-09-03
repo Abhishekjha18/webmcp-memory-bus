@@ -20,6 +20,13 @@ without burying old but highly relevant memories.
 edges between entities in a store separate from the episodic log. Nodes are
 upserted; edge and both nodes are written in one transaction.
 
+**Graph traversal.** `explore_concepts` walks the graph breadth-first from a
+named entity, using the `entity1`/`entity2` indexes directly, and bridges into
+the episodic store through matching tags — "what do I know that's connected to
+Postgres" surfaces both graph edges and tagged observations, including ones
+that share no vocabulary with the query. This is what makes the graph load-
+bearing rather than a flat, unused list of edges.
+
 **Filtered digests.** `summarize_context` filters by time range and/or topic and
 returns matching observations plus concept links, reporting the true match count
 even when the returned list is truncated.
@@ -48,19 +55,22 @@ appended rather than overwriting.
 arguments and result or error, rendered in the UI. Useful for watching an agent
 actually use the store, and the reason a failing tool call is diagnosable at all.
 
-**89 unit tests** across sanitization, store logic and the tool layer, gating
-deploy in CI.
+**140 unit tests** across sanitization, store logic, graph traversal and the
+tool layer, plus a real-stack integration suite (12/12) that exercises the
+actual embedding model and IndexedDB rather than mocks, gating deploy in CI.
 
 ---
 
 ## Honest limitations
 
-**Tools are tab-scoped, not ambient.** WebMCP scopes registered tools to the tab
-that registered them. An agent cannot reach this memory from some other site's
-tab; it has to actually be working with this page. The intended pattern is that
-an agent visits this page as its memory tool mid-task, calls what it needs, and
-continues elsewhere. If you expected a background memory service every tab can
-call, this is not that, and the spec does not currently allow that.
+**Tools are tab-scoped by default; the extension is opt-in.** WebMCP scopes
+registered tools to the tab that registered them, so out of the box an agent
+has to actually be working with this page to reach the memory. The optional
+companion extension (`extension/`) removes that limit by registering the same
+tools on every page — see [ARCHITECTURE.md](ARCHITECTURE.md) and
+`extension/README.md` — but it is a separate install, not something the live
+URL alone provides. A judge who only opens the site sees the tab-scoped
+behavior; the ambient behavior requires loading the unpacked extension too.
 
 **Real cross-process WebMCP invocation is not verified.** The tool layer is
 tested against a mocked `modelContext` and driven end-to-end through a headless
@@ -93,8 +103,8 @@ no merge or conflict resolution — an import appends.
 **No editing.** An observation can be stored and deleted, but not amended. Fixing
 a typo means deleting and re-storing, which loses the original timestamp.
 
-**Concept graph is recorded, not reasoned over.** `link_concepts` stores edges
-and `summarize_context` returns them, but nothing traverses the graph. There is
-no multi-hop query, no path finding, no inference. The semantic half of the
-"dual-graph" design is currently a well-structured record rather than an active
-retrieval mechanism.
+**Graph traversal is breadth-first, not weighted or typed.** `explore_concepts`
+walks outward by hop count alone — a `confidence: 0.1` edge and a `confidence: 1`
+edge count the same, and `relation` is never used to prefer one path over
+another (a `contradicts` edge is followed exactly like a `causes` edge). There
+is no path-finding between two named entities, only outward expansion from one.

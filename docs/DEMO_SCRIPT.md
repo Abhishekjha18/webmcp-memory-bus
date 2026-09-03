@@ -27,7 +27,7 @@ Hold on the badge for a beat — it is the proof the tools are live.
 
 ## 0:20–0:50 — An agent writes memory
 
-> "The page registers five tools through `document.modelContext.registerTool`.
+> "The page registers six tools through `document.modelContext.registerTool`.
 > I'll ask the agent to remember a decision."
 
 *On screen:* ask the agent to store an observation — e.g. *"Remember that we
@@ -73,7 +73,7 @@ chose IndexedDB over localStorage because the embedding vectors are too big."*
 
 ## 2:00–2:25 — Implementation
 
-> "Five tools in a single spec table, so schema, annotations and handler can't
+> "Six tools in a single spec table, so schema, annotations and handler can't
 > drift. Registration takes an `AbortSignal`, because WebMCP has no
 > `unregisterTool` — without it StrictMode registers everything twice. Tool text
 > budgets are checked at registration and enforced in tests."
@@ -81,7 +81,7 @@ chose IndexedDB over localStorage because the embedding vectors are too big."*
 *On screen:* briefly scroll `src/lib/webmcpTools.js` — the `TOOL_SPECS` table
 with `annotations`, then the `registerTool(..., options)` call.
 
-> "89 unit tests and a 42-check browser suite, both gating deployment in CI."
+> "140 unit tests and a real-stack integration suite (12/12 against the actual model and IndexedDB), gating deployment in CI."
 
 ## 2:25–2:40 — Close
 
@@ -90,7 +90,7 @@ with `annotations`, then the `registerTool(..., options)` call.
 > different session, can pick up where the last one left off. MIT licensed,
 > link's in the description."
 
-*On screen:* the four panels populated, then the live URL.
+*On screen:* the five cards populated, then the live URL.
 
 ---
 

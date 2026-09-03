@@ -1,9 +1,9 @@
 # Tool reference
 
-Five tools are registered on `document.modelContext` (falling back to
+Six tools are registered on `document.modelContext` (falling back to
 `navigator.modelContext`) when the page loads in a WebMCP-capable browser.
 
-All five are defined in one place — `TOOL_SPECS` in `src/lib/webmcpTools.js` —
+All six are defined in one place — `TOOL_SPECS` in `src/lib/webmcpTools.js` —
 so the schema, annotations and handler for a tool cannot drift apart.
 
 ## Annotations at a glance
@@ -15,6 +15,7 @@ so the schema, annotations and handler for a tool cannot drift apart.
 | `get_working_memory` | `true` | `true` |
 | `link_concepts` | `false` | `false` |
 | `summarize_context` | `true` | `true` |
+| `explore_concepts` | `true` | `true` |
 
 `untrustedContentHint` is set on exactly the tools whose output can replay text
 the calling agent did not write. See [SECURITY.md](SECURITY.md).
@@ -139,6 +140,40 @@ alone. Filters combine with AND.
 
 ---
 
+## `explore_concepts`
+
+Breadth-first walk of the concept graph outward from one entity — the tool
+that makes the semantic graph load-bearing rather than a flat, unused list of
+edges. See [ARCHITECTURE.md](ARCHITECTURE.md#graph-traversal) for the
+traversal design and [FEATURES.md](FEATURES.md) for what it does not do
+(no weighting by confidence, no relation-typed preference, no path-finding
+between two named entities).
+
+| Param | Type | Required | Notes |
+|---|---|---|---|
+| `entity` | string | yes | Concept or entity name to start from. Resolved case-insensitively on an exact-match miss. |
+| `depth` | number | no | How many hops to follow. Default 2, hard-capped at 4. |
+
+Returns:
+
+```js
+{
+  entity,          // the entity as actually stored (may differ in case from the query)
+  found,           // false if the entity is not in the graph at all
+  nodes,           // [{ name, hops }], including the root at hops: 0, capped at 15
+  edges,           // relation records among the returned nodes, deduplicated
+  observations,    // observations tagged with any returned node, content shielded, max 5
+}
+```
+
+A not-found entity returns `{ entity, found: false, nodes: [], edges: [],
+observations: [] }` rather than throwing — a graph with nothing yet linked
+under that name is an expected state, not an error.
+
+Throws `entity is required and must be a string` if `entity` is missing.
+
+---
+
 ## Text budgets
 
 Chrome's provisional limits, enforced by `checkToolBudgets()` and asserted in
@@ -147,7 +182,7 @@ Chrome's provisional limits, enforced by `checkToolBudgets()` and asserted in
 | Field | Limit | Current worst case |
 |---|---|---|
 | tool name | 30 | 18 (`get_working_memory`) |
-| tool description | 500 | 183 (`summarize_context`) |
+| tool description | 500 | 228 (`explore_concepts`) |
 | parameter description | 150 | 64 (`link_concepts.relation`) |
 | output | ~1500 | capped by a 240-char per-observation truncation and a 20-result limit |
 

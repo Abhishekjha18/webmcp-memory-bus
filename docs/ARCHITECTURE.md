@@ -6,7 +6,7 @@ storage, embedding, ranking, tool exposure — runs in the browser tab.
 ```
                     ┌─────────────────────────────────────┐
    browser agent    │  document.modelContext              │
-   (Chrome, flag)   │    .registerTool() x5               │
+   (Chrome, flag)   │    .registerTool() x6               │
         │           └──────────────┬──────────────────────┘
         │ executeTool()            │
         ▼                          ▼
@@ -45,7 +45,9 @@ and memoizes the connection promise. Three object stores:
 
 This is the dual-graph shape: an **episodic** log of what was observed, and a
 **semantic** graph of how entities relate. They are queried independently and
-joined only at summarization time.
+joined only at summarization time, and — via `explore_concepts` — at traversal
+time: each hop of a graph walk is one indexed lookup per frontier node against
+`entity1`/`entity2`, rather than a scan of the whole `relations` store.
 
 **`embeddings.js`** — lazily constructs a transformers.js `feature-extraction`
 pipeline over `Xenova/all-MiniLM-L6-v2`. Output is mean-pooled and L2-normalized,
@@ -64,7 +66,7 @@ a 384-float array per record is useless to both the UI and an agent.
 annotations, budget checks, the activity log, and the untrusted-content
 envelope.
 
-**`App.jsx`** — renders the four panels and calls `memoryStore` directly for the
+**`App.jsx`** — renders the five cards and calls `memoryStore` directly for the
 manual forms, so the UI is usable in a browser with no WebMCP support at all.
 
 ## Two important boundary decisions
@@ -97,12 +99,29 @@ multiplicative decay would make the store amnesic about anything from last month
 regardless of how relevant it is. Future timestamps clamp to age zero rather
 than scoring above 1.
 
+## Graph traversal
+
+`explore_concepts` is a breadth-first walk outward from one entity, capped at
+4 hops and 15 nodes so a dense graph still returns a quick glance rather than
+a dump. Two design choices worth naming:
+
+- **No structural link between an observation and a concept node.** The
+  episodic and semantic stores were designed independently, so traversal
+  bridges them through the one field they already share: an observation
+  tagged `postgres` is treated as being about the concept node `postgres`.
+  This means a graph walk can only surface observations someone bothered to
+  tag — it is a real but incomplete bridge, not a foreign key.
+- **Concept-name resolution is case-insensitive on a miss.** Concepts are
+  free text typed by agents and humans, so an exact index lookup is tried
+  first and a full scan of the (small) `concepts` store is the fallback,
+  rather than normalizing case at write time and losing the original casing.
+
 ## Registration lifecycle
 
 WebMCP has no `unregisterTool`. An `AbortSignal` is the only documented way to
 take a tool back down, so `App.jsx` creates an `AbortController` in its mount
 effect and aborts it on cleanup. Without this, React 19 StrictMode's dev-mode
-double-invoke would register two copies of all five tools.
+double-invoke would register two copies of all six tools.
 
 `getModelContext()` checks `document.modelContext` first and falls back to
 `navigator.modelContext`. Chrome is mid-migration between the two names; a build

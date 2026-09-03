@@ -63,7 +63,7 @@ first place.
 **Agent actions are legible.** A live Tool activity panel logs every tool call —
 name, arguments, result or error, timing — as it happens. Most agent memory is
 invisible: you cannot see what was saved on your behalf or why something was
-recalled. Here you watch it happen, and the four panels let you read, search and
+recalled. Here you watch it happen, and the five cards let you read, search and
 delete the store by hand.
 
 **It degrades gracefully.** The UI calls the memory layer directly rather than
@@ -91,16 +91,24 @@ through different doors — the human through the form, the agent through
 `store_observation` — and both read it back. It is one artifact two kinds of
 participant collaborate on, rather than the agent keeping private notes.
 
-**Honest scope:** WebMCP scopes tools to the registering tab, so this is not an
-ambient memory service every tab can call. The intended pattern is that an agent
-visits this page as its memory tool mid-task, uses it, and continues elsewhere.
-`docs/FEATURES.md` lists the rest of the limitations plainly.
+**Beyond the tab.** WebMCP scopes tools to the registering tab by default, so
+the base pattern is an agent visiting this page as its memory tool mid-task. An
+optional companion browser extension (`extension/`) removes that limit without
+changing what the standard allows: it registers the same six tools on every
+page you visit, so an agent helping you on `github.com` can reach what you
+recorded yesterday without being sent to this tab first. The extension holds no
+memory of its own — every call is forwarded to a same-origin bridge page, so it
+reads and writes the same IndexedDB this site displays, and all sanitization,
+shielding and limit clamping stay in the modules described above. A parity
+test guards the extension's duplicated tool declarations from drifting out of
+sync with the real ones. `docs/FEATURES.md` lists the remaining limitations
+plainly.
 
 ---
 
 ## The WebMCP implementation
 
-Five tools registered through `document.modelContext.registerTool({...})`, with
+Six tools registered through `document.modelContext.registerTool({...})`, with
 `navigator.modelContext` kept as a fallback because Chrome is mid-migration
 between the two namespaces.
 
@@ -111,15 +119,16 @@ between the two namespaces.
 | `get_working_memory` | Relevance blended with recency | `true` | `true` |
 | `link_concepts` | Write an edge in the concept graph | `false` | `false` |
 | `summarize_context` | Filtered digest by time and/or topic | `true` | `true` |
+| `explore_concepts` | Breadth-first walk of the concept graph, bridged to tagged observations | `true` | `true` |
 
 Specifics worth calling out:
 
-- **All five specs live in one `TOOL_SPECS` table**, so a tool's schema,
+- **All six specs live in one `TOOL_SPECS` table**, so a tool's schema,
   annotations and handler cannot drift apart.
 - **`AbortSignal` on registration.** The spec has no `unregisterTool`, so a
   signal is the only way to take tools down. Without it, React 19 StrictMode's
   double-invoked effect registers a duplicate set in development — verified in a
-  headless-browser check that asserts exactly five live registrations.
+  headless-browser check that asserts exactly six live registrations.
 - **`untrustedContentHint` is set on exactly the tools that replay stored text.**
   Stored observations are text an agent read somewhere else, so retrieval is a
   *stored* indirect-prompt-injection path: a payload persists and re-fires into
@@ -140,10 +149,12 @@ Specifics worth calling out:
   into destroying the real ones. Deletion is per-item in the UI, and export
   makes it recoverable.
 
-**Verification.** 89 unit tests (Vitest + `fake-indexeddb`) and a 42-check
-headless-browser suite that drives the real registered tools, both passing
-against the dev server and the production build. Lint and tests gate deployment
-in CI. The threat model in `docs/SECURITY.md` states what is *not* claimed: with
+**Verification.** 140 unit tests (Vitest + `fake-indexeddb`), a real-stack
+integration suite that runs the actual tool registration path against the real
+transformers.js model and IndexedDB (12/12 passing), and repeated
+headless-browser checks against both the dev server and the production build.
+Lint and tests gate deployment in CI. The threat model in `docs/SECURITY.md`
+states what is *not* claimed: with
 no server there is no mechanism that holds when the layers above it fail, and
 the last line of defense is a human reading a flag badge.
 

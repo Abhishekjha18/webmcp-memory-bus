@@ -10,7 +10,7 @@ Every agent conversation starts cold, even though your browser holds enormous co
 
 ## Trying it out
 
-The page works in **any** browser — the four panels call the memory layer
+The page works in **any** browser — the five cards call the memory layer
 directly, so you can store, search and browse without an agent present. That
 path needs no flags and no setup.
 
@@ -18,7 +18,7 @@ To exercise the **WebMCP tools** themselves you need an agent-capable browser:
 
 - **Chrome 149+**: enable `chrome://flags/#enable-webmcp-testing`, restart, then
   open the live URL. The badge in the header reads *"WebMCP tools registered"*
-  once the five tools are live, and every agent call appears in the **Tool
+  once the six tools are live, and every agent call appears in the **Tool
   activity** panel in real time.
 - **ChatGPT's in-app browser**: open the live URL and ask the agent to store and
   retrieve observations.
@@ -50,6 +50,7 @@ Suggested things to ask an agent:
 | `get_working_memory(current_task, limit?)` | Relevant + recent observations for what's happening right now. |
 | `link_concepts(entity1, entity2, relation, confidence?)` | Record a relation between two entities in the semantic graph. |
 | `summarize_context(time_range?, topic_filter?)` | Filtered digest of observations + concept links for the caller to summarize. |
+| `explore_concepts(entity, depth?)` | Walk the concept graph outward from one entity, returning connected concepts, edges, and tagged observations. |
 
 Full schemas, annotations and text budgets: [docs/TOOLS.md](docs/TOOLS.md).
 
@@ -73,7 +74,7 @@ WebMCP scopes registered tools to the tab that registered them — an agent must
 
 That tab-scoping is the one limit between this and "your browser has memory."
 [`extension/`](extension/) removes it without changing what the standard allows: it registers the
-same five tools on every page you visit, so an agent helping you on `github.com` can reach what you
+same six tools on every page you visit, so an agent helping you on `github.com` can reach what you
 recorded yesterday without being sent to the Memory Bus tab first.
 
 The extension stores nothing itself. Every call is forwarded to `bridge.html` on this origin, so it
@@ -104,9 +105,11 @@ npm run build
 npm test
 ```
 
-89 unit tests covering sanitization, store and ranking logic, and the tool layer
-(registration, annotations, budgets, shielding, activity logging) against a
-mocked `modelContext` and an in-memory IndexedDB.
+140 unit tests covering sanitization, store and ranking logic, graph traversal,
+and the tool layer (registration, annotations, budgets, shielding, activity
+logging) against a mocked `modelContext` and an in-memory IndexedDB, plus a
+real-stack integration suite that runs the same tools against the actual
+transformers.js model and IndexedDB (`RUN_INTEGRATION=1 npm test`).
 
 Lint and tests gate deployment: GitHub Actions runs `npm run lint` and `npm test`
 before building, and only a green run on `main` publishes to GitHub Pages.
