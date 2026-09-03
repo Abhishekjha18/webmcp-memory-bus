@@ -25,7 +25,7 @@ const {
   TOOL_SPECS,
 } = await import("./webmcpTools");
 
-const { storeObservation } = await import("./memoryStore");
+const { storeObservation, retrieveRelevant } = await import("./memoryStore");
 
 function makeModelContext() {
   const registered = new Map();
@@ -194,6 +194,51 @@ describe("checkToolBudgets", () => {
 
   it("does not throw when a schema has no properties", () => {
     expect(checkToolBudgets([{ name: "ok", description: "d", inputSchema: {} }])).toEqual([]);
+  });
+});
+
+describe("untrusted content shielding", () => {
+  let ctx;
+
+  beforeEach(() => {
+    ctx = makeModelContext();
+    globalThis.document = { modelContext: ctx };
+    registerMemoryBusTools();
+  });
+
+  it("wraps retrieve_relevant content in an untrusted envelope", async () => {
+    const out = await ctx.registered.get("retrieve_relevant").spec.execute({ query: "q" });
+    expect(out[0].content).toBe(
+      "<untrusted-user-content>a stored observation</untrusted-user-content>",
+    );
+  });
+
+  it("wraps get_working_memory content", async () => {
+    const out = await ctx.registered.get("get_working_memory").spec.execute({ current_task: "t" });
+    expect(out[0].content).toMatch(/^<untrusted-user-content>/);
+  });
+
+  it("wraps observations inside a summarize_context digest", async () => {
+    const out = await ctx.registered.get("summarize_context").spec.execute({});
+    expect(out.observations[0].content).toMatch(/^<untrusted-user-content>/);
+    expect(out.observation_count).toBe(1);
+  });
+
+  it("leaves non-content fields of a digest untouched", async () => {
+    const out = await ctx.registered.get("summarize_context").spec.execute({});
+    expect(out.related_concept_links).toEqual([]);
+  });
+
+  it("truncates an oversized stored observation before it reaches the agent", async () => {
+    retrieveRelevant.mockResolvedValueOnce([{ id: 9, content: "z".repeat(5000) }]);
+    const out = await ctx.registered.get("retrieve_relevant").spec.execute({ query: "q" });
+    expect(out[0].content.length).toBeLessThan(400);
+    expect(out[0].content).toContain("[truncated]");
+  });
+
+  it("does not envelope the output of the write tools", async () => {
+    const out = await ctx.registered.get("store_observation").spec.execute({ content: "hello" });
+    expect(out.content).toBe("hello");
   });
 });
 
