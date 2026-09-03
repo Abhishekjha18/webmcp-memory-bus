@@ -707,6 +707,31 @@ button.ghost.danger:hover:not(:disabled) {
   filter: none;
 }
 
+.item-actions {
+  display: flex;
+  gap: 6px;
+  flex-shrink: 0;
+}
+
+.supersede-item:hover {
+  color: var(--text);
+  border-color: rgba(255, 255, 255, 0.6);
+}
+
+.item-content.superseded {
+  color: var(--text-tertiary);
+  text-decoration: line-through;
+  text-decoration-color: rgba(255, 255, 255, 0.3);
+}
+
+.chip.superseded-chip {
+  font-style: italic;
+}
+
+.chip.replacement-chip {
+  border-color: var(--accent-line);
+}
+
 .empty {
   color: var(--text-tertiary);
   font-size: 0.85rem;

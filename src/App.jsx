@@ -208,6 +208,17 @@ export default function App() {
     setExploreResult(null);
   }
 
+  async function handleSupersede(oldObservation) {
+    const replacement = window.prompt(
+      "Replacement text. The old observation stays, marked superseded, for audit.",
+      oldObservation.content,
+    );
+    if (!replacement || !replacement.trim()) return;
+    // author: human here is what makes this path allowed to supersede a
+    // human-authored memory at all — see the rule in memoryStore.js.
+    await storeObservation({ content: replacement.trim(), supersedes: oldObservation.id, author: AUTHORS.HUMAN });
+  }
+
   async function handleExport() {
     const dump = await exportMemory();
     const blob = new Blob([JSON.stringify(dump, null, 2)], { type: "application/json" });
@@ -472,7 +483,9 @@ export default function App() {
             {observations.map((o) => (
               <li key={o.id}>
                 <div className="item-main">
-                  <div className="item-content">{o.content}</div>
+                  <div className={`item-content${o.supersededBy != null ? " superseded" : ""}`}>
+                    {o.content}
+                  </div>
                   <div className="item-meta">
                     {o.flagged && (
                       <span
@@ -480,6 +493,19 @@ export default function App() {
                         title="This text matches prompt-injection patterns. It is stored and shown as-is, and is marked as untrusted content when returned to an agent."
                       >
                         flagged
+                      </span>
+                    )}
+                    {o.supersededBy != null && (
+                      <span
+                        className="chip superseded-chip"
+                        title="A newer observation replaces this one. Kept visible for audit, and heavily down-weighted in working-memory results."
+                      >
+                        superseded
+                      </span>
+                    )}
+                    {o.supersedes != null && (
+                      <span className="chip replacement-chip" title="This observation replaces an earlier one.">
+                        replacement
                       </span>
                     )}
                     {AUTHOR_LABELS[o.author] && (
@@ -500,14 +526,24 @@ export default function App() {
                     ))}
                   </div>
                 </div>
-                <button
-                  className="delete-item"
-                  onClick={() => deleteObservation(o.id)}
-                  title="Delete this observation"
-                  aria-label="Delete this observation"
-                >
-                  ×
-                </button>
+                <div className="item-actions">
+                  <button
+                    className="delete-item supersede-item"
+                    onClick={() => handleSupersede(o)}
+                    title="Replace this observation with new text; the old one stays, marked superseded"
+                    aria-label="Supersede this observation"
+                  >
+                    ↻
+                  </button>
+                  <button
+                    className="delete-item"
+                    onClick={() => deleteObservation(o.id)}
+                    title="Delete this observation"
+                    aria-label="Delete this observation"
+                  >
+                    ×
+                  </button>
+                </div>
               </li>
             ))}
           </ul>
