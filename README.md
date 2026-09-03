@@ -2,6 +2,8 @@
 
 **Live app: <https://abhishekjha18.github.io/webmcp-memory-bus/>**
 
+Created by Abhishek Jha with Codex.
+
 A persistent, browser-local semantic memory layer exposed to AI agents through [WebMCP](https://developer.chrome.com/docs/ai/webmcp) (`document.modelContext`, falling back to `navigator.modelContext`).
 
 Every agent conversation starts cold, even though your browser holds enormous context — what you've read, decided, and noticed. This app is a WebMCP-enabled site an agent can visit mid-task to store and retrieve that context, backed by a dual-graph memory model (episodic observations + a semantic concept graph) inspired by the STARK architecture, running entirely client-side.
