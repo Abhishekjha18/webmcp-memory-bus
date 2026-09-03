@@ -3,6 +3,8 @@ name: Deploy to GitHub Pages
 on:
   push:
     branches: [main]
+  pull_request:
+    branches: [main]
   workflow_dispatch:
 
 permissions:
@@ -11,11 +13,28 @@ permissions:
   id-token: write
 
 concurrency:
-  group: pages
+  # Keyed by ref so a pull-request run cannot cancel an in-flight deploy of main.
+  group: pages-${{ github.ref }}
   cancel-in-progress: true
 
 jobs:
+  # Gate the deploy on lint and the unit suite. A memory store that silently
+  # stops sanitizing what it hands back to an agent should never reach the
+  # live site.
+  verify:
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+      - uses: actions/setup-node@v4
+        with:
+          node-version: 20
+          cache: npm
+      - run: npm ci
+      - run: npm run lint
+      - run: npm test
+
   build:
+    needs: verify
     runs-on: ubuntu-latest
     steps:
       - uses: actions/checkout@v4
@@ -25,12 +44,17 @@ jobs:
           cache: npm
       - run: npm ci
       - run: npm run build
+      # On a pull request the build is only a compile check; nothing is published.
       - uses: actions/configure-pages@v5
+        if: github.event_name != 'pull_request'
       - uses: actions/upload-pages-artifact@v3
+        if: github.event_name != 'pull_request'
         with:
           path: dist
 
   deploy:
+    # Pull requests verify and build, but only main deploys.
+    if: github.event_name != 'pull_request'
     needs: build
     runs-on: ubuntu-latest
     environment:
