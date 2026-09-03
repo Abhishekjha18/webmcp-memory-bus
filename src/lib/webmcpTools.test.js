@@ -14,6 +14,13 @@ vi.mock("./memoryStore", () => ({
     observations: [{ id: 4, content: "summarized observation" }],
     related_concept_links: [],
   })),
+  exploreConcepts: vi.fn(async () => ({
+    entity: "postgres",
+    found: true,
+    nodes: [{ name: "postgres", hops: 0 }, { name: "rollback", hops: 1 }],
+    edges: [{ entity1: "postgres", entity2: "rollback", relation: "requires", confidence: 1 }],
+    observations: [{ id: 5, content: "connected observation" }],
+  })),
 }));
 
 const {
@@ -67,7 +74,7 @@ describe("getModelContext namespace resolution", () => {
     globalThis.document = { modelContext: doc };
     globalThis.navigator = { modelContext: nav };
     registerMemoryBusTools();
-    expect(doc.registered.size).toBe(5);
+    expect(doc.registered.size).toBe(6);
     expect(nav.registered.size).toBe(0);
   });
 });
@@ -80,9 +87,10 @@ describe("registerMemoryBusTools", () => {
     globalThis.document = { modelContext: ctx };
   });
 
-  it("registers all five tools and returns true", () => {
+  it("registers all six tools and returns true", () => {
     expect(registerMemoryBusTools()).toBe(true);
     expect([...ctx.registered.keys()].sort()).toEqual([
+      "explore_concepts",
       "get_working_memory",
       "link_concepts",
       "retrieve_relevant",
@@ -129,11 +137,12 @@ describe("tool annotations", () => {
     globalThis.document = { modelContext: makeModelContext() };
   });
 
-  it("marks the three read tools readOnlyHint and the two writers not", () => {
+  it("marks the four read tools readOnlyHint and the two writers not", () => {
     const byName = Object.fromEntries(TOOL_SPECS.map((s) => [s.name, s.annotations]));
     expect(byName.retrieve_relevant.readOnlyHint).toBe(true);
     expect(byName.get_working_memory.readOnlyHint).toBe(true);
     expect(byName.summarize_context.readOnlyHint).toBe(true);
+    expect(byName.explore_concepts.readOnlyHint).toBe(true);
     expect(byName.store_observation.readOnlyHint).toBe(false);
     expect(byName.link_concepts.readOnlyHint).toBe(false);
   });
@@ -145,6 +154,7 @@ describe("tool annotations", () => {
     expect(byName.retrieve_relevant.untrustedContentHint).toBe(true);
     expect(byName.get_working_memory.untrustedContentHint).toBe(true);
     expect(byName.summarize_context.untrustedContentHint).toBe(true);
+    expect(byName.explore_concepts.untrustedContentHint).toBe(true);
     expect(byName.store_observation.untrustedContentHint).toBe(false);
     expect(byName.link_concepts.untrustedContentHint).toBe(false);
   });
@@ -227,6 +237,23 @@ describe("untrusted content shielding", () => {
   it("leaves non-content fields of a digest untouched", async () => {
     const out = await ctx.registered.get("summarize_context").spec.execute({});
     expect(out.related_concept_links).toEqual([]);
+  });
+
+  it("wraps observations bundled with an explore_concepts result", async () => {
+    const out = await ctx.registered.get("explore_concepts").spec.execute({ entity: "postgres" });
+    expect(out.observations[0].content).toMatch(/^<untrusted-user-content>/);
+  });
+
+  it("leaves the graph shape of an explore_concepts result untouched", async () => {
+    const out = await ctx.registered.get("explore_concepts").spec.execute({ entity: "postgres" });
+    expect(out.nodes).toEqual([
+      { name: "postgres", hops: 0 },
+      { name: "rollback", hops: 1 },
+    ]);
+    expect(out.edges).toEqual([
+      { entity1: "postgres", entity2: "rollback", relation: "requires", confidence: 1 },
+    ]);
+    expect(out.found).toBe(true);
   });
 
   it("truncates an oversized stored observation before it reaches the agent", async () => {
