@@ -32,8 +32,9 @@ describe.skipIf(!run)("integration: real tools, real embeddings", () => {
     tools = registered;
   }, 300_000);
 
-  it("registers exactly the five intended tools", () => {
+  it("registers exactly the six intended tools", () => {
     expect(tools.map((t) => t.name).sort()).toEqual([
+      "explore_concepts",
       "get_working_memory",
       "link_concepts",
       "retrieve_relevant",
@@ -113,4 +114,28 @@ describe.skipIf(!run)("integration: real tools, real embeddings", () => {
     expect(digest.observation_count).toBeGreaterThan(0);
     expect(digest.observations[0].content).toMatch(/^<untrusted-user-content>/);
   }, 120_000);
+
+  it("walks the real relations store via its entity1/entity2 indexes", async () => {
+    await call("link_concepts", { entity1: "postgres", entity2: "connection pooling", relation: "requires" });
+    await call("link_concepts", { entity1: "connection pooling", entity2: "pgbouncer", relation: "implemented by" });
+    await call("store_observation", {
+      content: "pgbouncer defaults to transaction pooling mode, which breaks session-level advisory locks",
+      tags: ["pgbouncer"],
+    });
+
+    const out = await call("explore_concepts", { entity: "Postgres", depth: 2 });
+    expect(out.found).toBe(true);
+    // Case-insensitive resolution: queried "Postgres", stored as "postgres".
+    expect(out.entity).toBe("postgres");
+    const names = out.nodes.map((n) => n.name);
+    expect(names).toContain("connection pooling");
+    expect(names).toContain("pgbouncer"); // two hops out, within depth: 2
+    expect(out.observations[0].content).toMatch(/^<untrusted-user-content>/);
+    expect(out.observations[0].content).toContain("transaction pooling");
+  }, 120_000);
+
+  it("returns found: false for an entity that was never linked", async () => {
+    const out = await call("explore_concepts", { entity: "a concept nobody ever recorded" });
+    expect(out).toMatchObject({ found: false, nodes: [], edges: [], observations: [] });
+  });
 });
