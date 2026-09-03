@@ -146,6 +146,12 @@ describe("retrieveRelevant", () => {
     expect(await retrieveRelevant({ query: "note" })).toHaveLength(5);
   });
 
+  it("caps an oversized limit so a caller cannot drain the whole store", async () => {
+    for (let i = 0; i < 30; i++) await storeObservation({ content: `note number ${i}` });
+    const results = await retrieveRelevant({ query: "note", limit: 1000 });
+    expect(results).toHaveLength(20);
+  });
+
   it("rejects a missing query", async () => {
     await expect(retrieveRelevant({})).rejects.toThrow(/query is required/);
   });
@@ -189,6 +195,11 @@ describe("getWorkingMemory", () => {
     await storeObservation({ content: "alpha beta gamma", timestamp: future });
     const [top] = await getWorkingMemory({ current_task: "alpha beta gamma" });
     expect(top.score / top.similarity).toBeLessThanOrEqual(1.0001);
+  });
+
+  it("caps an oversized limit", async () => {
+    for (let i = 0; i < 30; i++) await storeObservation({ content: `note number ${i}` });
+    expect(await getWorkingMemory({ current_task: "note", limit: 1000 })).toHaveLength(20);
   });
 
   it("rejects a missing current_task", async () => {

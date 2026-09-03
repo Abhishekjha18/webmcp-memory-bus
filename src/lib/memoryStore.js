@@ -2,6 +2,7 @@ import { getDB, OBSERVATIONS_STORE, CONCEPTS_STORE, RELATIONS_STORE } from "./db
 import { embed, cosineSimilarity } from "./embeddings";
 import { sanitizeText, scanForInjection } from "./sanitize";
 
+const MAX_RETRIEVAL_LIMIT = 20;
 
 const listeners = new Set();
 
@@ -51,7 +52,7 @@ export async function retrieveRelevant({ query, task_context = "", limit = 5 }) 
   const ranked = observations
     .map((obs) => ({ ...obs, score: cosineSimilarity(queryEmbedding, obs.embedding) }))
     .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
+    .slice(0, Math.min(limit, MAX_RETRIEVAL_LIMIT))
     .map(({ embedding, ...rest }) => rest);
   return ranked;
 }
@@ -72,7 +73,7 @@ export async function getWorkingMemory({ current_task, limit = 5, recencyHalfLif
       return { ...obs, similarity, score };
     })
     .sort((a, b) => b.score - a.score)
-    .slice(0, limit)
+    .slice(0, Math.min(limit, MAX_RETRIEVAL_LIMIT))
     .map(({ embedding, ...rest }) => rest);
   return ranked;
 }
