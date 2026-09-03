@@ -152,11 +152,14 @@ export default function App() {
   return (
     <div className="page">
       <header className="header">
-        <div>
-          <h1>Agent Memory Bus</h1>
-          <p className="subtitle">Persistent, browser-local semantic memory exposed over WebMCP.</p>
+        <div className="brand">
+          <div>
+            <h1>Agent Memory Bus</h1>
+            <p className="subtitle">Persistent, browser-local semantic memory exposed over WebMCP.</p>
+          </div>
         </div>
         <span className={`status-badge status-${webmcpStatus}`}>
+          <span className="status-dot" aria-hidden="true" />
           {webmcpStatus === "available" && "WebMCP tools registered"}
           {webmcpStatus === "unavailable" && "WebMCP not available in this browser"}
           {webmcpStatus === "checking" && "Checking WebMCP..."}
@@ -180,11 +183,12 @@ export default function App() {
 
       <main className="grid">
         <section className="panel">
-          <h2>Add an observation</h2>
-          <p className="hint">
-            Manual entry point for testing. In real use, an agent calls the{" "}
-            <code>store_observation</code> tool for you.
-          </p>
+          <div className="panel-header">
+            <h2>Add an observation</h2>
+            <p className="hint" style={{ margin: 0 }}>
+              An agent normally calls <code>store_observation</code> for you
+            </p>
+          </div>
           <form onSubmit={handleAddObservation} className="form">
             <textarea
               placeholder="What did you read, decide, or notice?"
@@ -209,8 +213,15 @@ export default function App() {
               {saving ? "Embedding + saving..." : "Store observation"}
             </button>
           </form>
+        </section>
 
-          <h2>Test retrieval</h2>
+        <section className="panel">
+          <div className="panel-header">
+            <h2>Search memory</h2>
+            <p className="hint" style={{ margin: 0 }}>
+              Semantic similarity, not keyword match
+            </p>
+          </div>
           <form onSubmit={handleSearch} className="form">
             <input
               type="text"
@@ -227,11 +238,11 @@ export default function App() {
               {searchResults.length === 0 && <li className="empty">No matches.</li>}
               {searchResults.map((r) => (
                 <li key={r.id}>
-                  <div className="score">{r.score.toFixed(3)}</div>
                   <div>
                     <div className="obs-content">{r.content}</div>
                     <div className="obs-meta">{formatTime(r.timestamp)}</div>
                   </div>
+                  <div className="score">{r.score.toFixed(3)}</div>
                 </li>
               ))}
             </ul>
@@ -239,15 +250,19 @@ export default function App() {
         </section>
 
         <section className="panel">
-          <h2>Tool activity</h2>
-          <p className="hint">Live log of every WebMCP tool call an agent has made against this memory.</p>
+          <div className="panel-header">
+            <h2>Tool activity</h2>
+            <p className="hint" style={{ margin: 0 }}>Every call an agent makes, live</p>
+          </div>
           <ul className="activity-log">
             {activity.length === 0 && <li className="empty">No tool calls yet.</li>}
             {activity.map((entry, i) => (
               <li key={i} className={entry.ok ? "ok" : "err"}>
-                <code>{entry.name}</code>
+                <div className="activity-log-main">
+                  <code>{entry.name}</code>
+                  {!entry.ok && <div className="activity-error">{entry.error}</div>}
+                </div>
                 <span className="activity-time">{formatTime(entry.at)}</span>
-                {!entry.ok && <div className="activity-error">{entry.error}</div>}
               </li>
             ))}
           </ul>
@@ -280,6 +295,30 @@ export default function App() {
             {observations.length === 0 && <li className="empty">Nothing stored yet.</li>}
             {observations.map((o) => (
               <li key={o.id}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="obs-content">{o.content}</div>
+                  <div className="obs-meta">
+                    {o.flagged && (
+                      <span
+                        className="badge flag"
+                        title="This text matches prompt-injection patterns. It is stored and shown as-is, and is marked as untrusted content when returned to an agent."
+                      >
+                        flagged
+                      </span>
+                    )}
+                    <span>{formatTime(o.timestamp)}</span>
+                    {o.source_url && (
+                      <a href={o.source_url} target="_blank" rel="noreferrer">
+                        source
+                      </a>
+                    )}
+                    {o.tags?.map((tag) => (
+                      <span className="badge" key={tag}>
+                        {tag}
+                      </span>
+                    ))}
+                  </div>
+                </div>
                 <button
                   className="delete-item"
                   onClick={() => deleteObservation(o.id)}
@@ -288,30 +327,6 @@ export default function App() {
                 >
                   ×
                 </button>
-                <div className="obs-content">{o.content}</div>
-                <div className="obs-meta">
-                  {o.flagged && (
-                    <>
-                      <span
-                        className="flag"
-                        title="This text matches prompt-injection patterns. It is stored and shown as-is, and is marked as untrusted content when returned to an agent."
-                      >
-                        ⚠ injection-flagged
-                      </span>
-                      {" · "}
-                    </>
-                  )}
-                  {formatTime(o.timestamp)}
-                  {o.source_url && (
-                    <>
-                      {" · "}
-                      <a href={o.source_url} target="_blank" rel="noreferrer">
-                        source
-                      </a>
-                    </>
-                  )}
-                  {o.tags?.length > 0 && <> · {o.tags.join(", ")}</>}
-                </div>
               </li>
             ))}
           </ul>
@@ -323,6 +338,15 @@ export default function App() {
             {relations.length === 0 && <li className="empty">No links recorded yet.</li>}
             {relations.map((r) => (
               <li key={r.id}>
+                <div style={{ flex: 1, minWidth: 0 }}>
+                  <div className="obs-content">
+                    <strong>{r.entity1}</strong> —{r.relation}→ <strong>{r.entity2}</strong>
+                  </div>
+                  <div className="obs-meta">
+                    <span className="badge">conf {r.confidence}</span>
+                    <span>{formatTime(r.timestamp)}</span>
+                  </div>
+                </div>
                 <button
                   className="delete-item"
                   onClick={() => deleteRelation(r.id)}
@@ -331,12 +355,6 @@ export default function App() {
                 >
                   ×
                 </button>
-                <div className="obs-content">
-                  <strong>{r.entity1}</strong> —{r.relation}→ <strong>{r.entity2}</strong>
-                </div>
-                <div className="obs-meta">
-                  confidence {r.confidence} · {formatTime(r.timestamp)}
-                </div>
               </li>
             ))}
           </ul>
