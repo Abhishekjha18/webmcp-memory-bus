@@ -144,6 +144,167 @@ describe("storeObservation", () => {
     const rec2 = await storeObservation({ content: "y", author: "definitely not real" });
     expect(rec2.author).toBe(AUTHORS.AGENT);
   });
+
+  it("defaults supersedes and supersededBy to null", async () => {
+    const rec = await storeObservation({ content: "plain" });
+    expect(rec.supersedes).toBeNull();
+    expect(rec.supersededBy).toBeNull();
+  });
+});
+
+describe("superseding", () => {
+  it("marks the target's supersededBy with the new record's id", async () => {
+    const original = await storeObservation({ content: "old fact", author: AUTHORS.AGENT });
+    const replacement = await storeObservation({
+      content: "corrected fact",
+      author: AUTHORS.AGENT,
+      supersedes: original.id,
+    });
+    expect(replacement.supersedes).toBe(original.id);
+    const stored = await getAllObservationsForUI();
+    const updatedOriginal = stored.find((o) => o.id === original.id);
+    expect(updatedOriginal.supersededBy).toBe(replacement.id);
+  });
+
+  it("silently ignores a supersedes id that does not exist", async () => {
+    const rec = await storeObservation({ content: "x", supersedes: 999999 });
+    expect(rec.supersedes).toBeNull();
+  });
+
+  it("silently ignores a non-numeric supersedes value", async () => {
+    const rec = await storeObservation({ content: "x", supersedes: "not a number" });
+    expect(rec.supersedes).toBeNull();
+  });
+
+  it("silently ignores a missing supersedes value", async () => {
+    const rec = await storeObservation({ content: "x" });
+    expect(rec.supersedes).toBeNull();
+  });
+
+  it("allows an agent-authored observation to supersede another agent-authored one", async () => {
+    const original = await storeObservation({ content: "old", author: AUTHORS.AGENT });
+    const replacement = await storeObservation({
+      content: "new",
+      author: AUTHORS.AGENT,
+      supersedes: original.id,
+    });
+    expect(replacement.supersedes).toBe(original.id);
+  });
+
+  it("allows an agent-authored observation to supersede an imported one", async () => {
+    await importMemory({ version: 1, observations: [{ content: "old imported fact" }], relations: [] });
+    const [imported] = await getAllObservationsForUI();
+    expect(imported.author).toBe(AUTHORS.IMPORTED);
+    const replacement = await storeObservation({
+      content: "new",
+      author: AUTHORS.AGENT,
+      supersedes: imported.id,
+    });
+    expect(replacement.supersedes).toBe(imported.id);
+  });
+
+  it("allows a human-authored observation to supersede a human-authored one", async () => {
+    const original = await storeObservation({ content: "old note", author: AUTHORS.HUMAN });
+    const replacement = await storeObservation({
+      content: "corrected note",
+      author: AUTHORS.HUMAN,
+      supersedes: original.id,
+    });
+    expect(replacement.supersedes).toBe(original.id);
+    const stored = await getAllObservationsForUI();
+    expect(stored.find((o) => o.id === original.id).supersededBy).toBe(replacement.id);
+  });
+
+  it("blocks an agent-authored observation from superseding a human-authored one", async () => {
+    // The generalization of "agents write, only humans erase": an agent
+    // cannot stealth-suppress a human's note by claiming to replace it.
+    const humanNote = await storeObservation({ content: "important human note", author: AUTHORS.HUMAN });
+    const attempt = await storeObservation({
+      content: "agent trying to overwrite it",
+      author: AUTHORS.AGENT,
+      supersedes: humanNote.id,
+    });
+    expect(attempt.supersedes).toBeNull();
+    const stored = await getAllObservationsForUI();
+    expect(stored.find((o) => o.id === humanNote.id).supersededBy).toBeNull();
+  });
+
+  it("does not let a forged author: human bypass the human-note protection", async () => {
+    // storeObservation's own coerceAuthor already prevents this at the
+    // store layer, independent of the webmcpTools boundary override tested
+    // elsewhere: passing author: "human" straight to storeObservation IS
+    // legitimately human (there is nothing further to forge once you're
+    // calling this function directly), so this instead proves the rule
+    // keys off the ACTUAL resolved author, not the target's.
+    const humanNote = await storeObservation({ content: "note", author: AUTHORS.HUMAN });
+    const secondHumanNote = await storeObservation({
+      content: "correction",
+      author: AUTHORS.HUMAN,
+      supersedes: humanNote.id,
+    });
+    expect(secondHumanNote.supersedes).toBe(humanNote.id);
+  });
+
+  it("allows chaining: superseding an already-superseded observation", async () => {
+    const v1 = await storeObservation({ content: "v1", author: AUTHORS.AGENT });
+    const v2 = await storeObservation({ content: "v2", author: AUTHORS.AGENT, supersedes: v1.id });
+    const v3 = await storeObservation({ content: "v3", author: AUTHORS.AGENT, supersedes: v2.id });
+    const stored = await getAllObservationsForUI();
+    const byId = Object.fromEntries(stored.map((o) => [o.id, o]));
+    expect(byId[v1.id].supersededBy).toBe(v2.id); // untouched by v3's write
+    expect(byId[v2.id].supersededBy).toBe(v3.id);
+    expect(byId[v3.id].supersededBy).toBeNull();
+  });
+
+  it("get_working_memory heavily down-weights a superseded observation", async () => {
+    const original = await storeObservation({ content: "alpha beta gamma", author: AUTHORS.AGENT });
+    await storeObservation({ content: "alpha beta gamma", author: AUTHORS.AGENT, supersedes: original.id });
+    const results = await getWorkingMemory({ current_task: "alpha beta gamma" });
+    const supersededResult = results.find((r) => r.id === original.id);
+    const replacementResult = results.find((r) => r.id !== original.id);
+    expect(supersededResult.score).toBeLessThan(replacementResult.score);
+    // "Heavily" — not just lower, but the documented 0.15x order of
+    // magnitude. Both observations are freshly stored (recencyWeight ~= 1)
+    // and agent-authored (provenanceWeight = 0), so the ratio isolates the
+    // supersede penalty: (0.7 + 0.3*1) * (0.95 + 0.05*0) * 0.15.
+    expect(supersededResult.score / supersededResult.similarity).toBeCloseTo(1.0 * 0.95 * 0.15, 3);
+  });
+
+  it("still returns a superseded observation when nothing else competes", async () => {
+    // "Stays visible for audit" means down-ranked, not filtered out.
+    const original = await storeObservation({ content: "only fact in the store" });
+    await storeObservation({ content: "only fact in the store", supersedes: original.id });
+    const results = await getWorkingMemory({ current_task: "only fact in the store" });
+    expect(results.some((r) => r.id === original.id)).toBe(true);
+  });
+
+  it("does not down-weight a superseded observation in retrieve_relevant", async () => {
+    // Mirrors the author/retrieve_relevant boundary: pure similarity stays
+    // pure. The fields are still present in the output for a caller who
+    // wants to check, just not used to reorder anything here.
+    const original = await storeObservation({ content: "alpha beta gamma" });
+    await storeObservation({ content: "alpha beta gamma", supersedes: original.id });
+    const results = await retrieveRelevant({ query: "alpha beta gamma" });
+    expect(results[0].score).toBe(results[1].score);
+    expect(results.some((r) => r.supersededBy != null)).toBe(true);
+  });
+
+  it("strips supersedes and supersededBy from an imported file, even if present", async () => {
+    const result = await importMemory({
+      version: 1,
+      observations: [
+        { content: "first", supersedes: 42 },
+        { content: "second", supersededBy: 7 },
+      ],
+      relations: [],
+    });
+    expect(result.observations).toBe(2);
+    const stored = await getAllObservationsForUI();
+    for (const o of stored) {
+      expect(o.supersedes).toBeNull();
+      expect(o.supersededBy).toBeNull();
+    }
+  });
 });
 
 describe("retrieveRelevant", () => {

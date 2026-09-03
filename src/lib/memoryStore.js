@@ -38,25 +38,66 @@ function coerceAuthor(author) {
   return author === AUTHORS.HUMAN ? AUTHORS.HUMAN : AUTHORS.AGENT;
 }
 
-export async function storeObservation({ content, source_url, timestamp, tags = [], author }) {
+export async function storeObservation({
+  content,
+  source_url,
+  timestamp,
+  tags = [],
+  author,
+  supersedes,
+}) {
   if (!content || typeof content !== "string") {
     throw new Error("content is required and must be a string");
   }
   const cleanContent = sanitizeText(content);
   const cleanTags = (tags || []).map((t) => sanitizeText(String(t)));
   const flagged = scanForInjection(cleanContent);
+  const cleanAuthor = coerceAuthor(author);
   const embedding = await embed(cleanContent);
+
   const db = await getDB();
+  const tx = db.transaction(OBSERVATIONS_STORE, "readwrite");
+  const store = tx.objectStore(OBSERVATIONS_STORE);
+
+  // Resolve the supersede target inside the same transaction as the write,
+  // before the new record exists, so an invalid reference is never stored
+  // as if it were real.
+  //
+  // Mirrors "agents write, only humans erase": an agent-authored call may
+  // not demote a human-authored memory by marking it superseded — that
+  // would let a hostile agent stealth-suppress a real note it dislikes
+  // without ever needing a delete tool. Only a human-authored call may
+  // supersede a human-authored one; anything else (agent superseding
+  // agent, agent superseding imported, human superseding anything) is
+  // allowed. Silently ignored rather than thrown, since supersedes is an
+  // optional courtesy field, not a required contract.
+  let supersedeTarget = null;
+  const rawSupersedes = Number(supersedes);
+  if (Number.isFinite(rawSupersedes)) {
+    const candidate = await store.get(rawSupersedes);
+    if (candidate && !(candidate.author === AUTHORS.HUMAN && cleanAuthor !== AUTHORS.HUMAN)) {
+      supersedeTarget = candidate;
+    }
+  }
+
   const record = {
     content: cleanContent,
     source_url: source_url || null,
     timestamp: coerceTimestamp(timestamp),
     tags: cleanTags,
     flagged,
-    author: coerceAuthor(author),
+    author: cleanAuthor,
+    supersedes: supersedeTarget ? supersedeTarget.id : null,
+    supersededBy: null,
     embedding,
   };
-  const id = await db.add(OBSERVATIONS_STORE, record);
+  const id = await store.add(record);
+
+  if (supersedeTarget) {
+    await store.put({ ...supersedeTarget, supersededBy: id });
+  }
+
+  await tx.done;
   notify();
   return { id, ...record };
 }
@@ -142,7 +183,14 @@ export async function getWorkingMemory({ current_task, limit = 5, recencyHalfLif
       // only nudge a near-tie, never let a barely-relevant note the user
       // typed outrank a highly relevant one an agent recorded.
       const provenanceWeight = obs.author === AUTHORS.HUMAN ? 1 : 0;
-      const score = similarity * (0.7 + 0.3 * recencyWeight) * (0.95 + 0.05 * provenanceWeight);
+      // Unlike recency and provenance, this is not a preference dimension —
+      // it is a flat, heavy demotion for a fact the user or an agent has
+      // since retracted. A retracted memory should almost never win unless
+      // nothing else is even remotely relevant, so this is a direct
+      // multiplier rather than a bounded floor+range like the other two.
+      const supersededPenalty = obs.supersededBy != null ? 0.15 : 1;
+      const score =
+        similarity * (0.7 + 0.3 * recencyWeight) * (0.95 + 0.05 * provenanceWeight) * supersededPenalty;
       return { ...obs, similarity, score };
     })
     .sort((a, b) => b.score - a.score)
@@ -452,6 +500,17 @@ export async function importMemory(data) {
       // a hand-crafted "export" could mark every record author: "human" and
       // buy the getWorkingMemory ranking bonus that implies.
       author: AUTHORS.IMPORTED,
+      // supersedes/supersededBy are always dropped on import, never read
+      // from raw. Ids are reassigned by autoIncrement on add — "ids are not
+      // preserved" is already the documented contract — so any cross-
+      // reference an export file carries points at an id that means
+      // nothing, or worse, coincidentally points at an unrelated record in
+      // the destination store. Rebuilding the relationship across an
+      // import would need a full old-id -> new-id remap in a first pass,
+      // which is a real feature in its own right; dropping it here keeps
+      // import from ever wiring a stale or wrong version relationship.
+      supersedes: null,
+      supersededBy: null,
       embedding,
     });
     importedObservations++;
