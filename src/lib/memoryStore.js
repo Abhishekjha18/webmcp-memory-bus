@@ -1,5 +1,7 @@
 import { getDB, OBSERVATIONS_STORE, CONCEPTS_STORE, RELATIONS_STORE } from "./db";
 import { embed, cosineSimilarity } from "./embeddings";
+import { sanitizeText, scanForInjection } from "./sanitize";
+
 
 const listeners = new Set();
 
@@ -16,13 +18,17 @@ export async function storeObservation({ content, source_url, timestamp, tags = 
   if (!content || typeof content !== "string") {
     throw new Error("content is required and must be a string");
   }
-  const embedding = await embed(content);
+  const cleanContent = sanitizeText(content);
+  const cleanTags = (tags || []).map((t) => sanitizeText(String(t)));
+  const flagged = scanForInjection(cleanContent);
+  const embedding = await embed(cleanContent);
   const db = await getDB();
   const record = {
-    content,
+    content: cleanContent,
     source_url: source_url || null,
     timestamp: timestamp || new Date().toISOString(),
-    tags,
+    tags: cleanTags,
+    flagged,
     embedding,
   };
   const id = await db.add(OBSERVATIONS_STORE, record);
@@ -75,20 +81,23 @@ export async function linkConcepts({ entity1, entity2, relation, confidence = 1 
   if (!entity1 || !entity2 || !relation) {
     throw new Error("entity1, entity2, and relation are required");
   }
+  const cleanEntity1 = sanitizeText(entity1);
+  const cleanEntity2 = sanitizeText(entity2);
+  const cleanRelation = sanitizeText(relation);
   const db = await getDB();
   const tx = db.transaction([CONCEPTS_STORE, RELATIONS_STORE], "readwrite");
-  await tx.objectStore(CONCEPTS_STORE).put({ name: entity1 });
-  await tx.objectStore(CONCEPTS_STORE).put({ name: entity2 });
+  await tx.objectStore(CONCEPTS_STORE).put({ name: cleanEntity1 });
+  await tx.objectStore(CONCEPTS_STORE).put({ name: cleanEntity2 });
   const id = await tx.objectStore(RELATIONS_STORE).add({
-    entity1,
-    entity2,
-    relation,
+    entity1: cleanEntity1,
+    entity2: cleanEntity2,
+    relation: cleanRelation,
     confidence,
     timestamp: new Date().toISOString(),
   });
   await tx.done;
   notify();
-  return { id, entity1, entity2, relation, confidence };
+  return { id, entity1: cleanEntity1, entity2: cleanEntity2, relation: cleanRelation, confidence };
 }
 
 export async function summarizeContext({ time_range, topic_filter }) {
