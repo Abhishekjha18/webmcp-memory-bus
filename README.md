@@ -69,6 +69,20 @@ overclaiming.
 
 WebMCP scopes registered tools to the tab that registered them — an agent must be interacting with this tab to call these tools, they aren't ambiently reachable from every other open tab. In practice: an agent working across sites explicitly visits this page as its "memory" tool mid-task, calls the tools it needs, then continues its work elsewhere.
 
+## Ambient mode (optional companion extension)
+
+That tab-scoping is the one limit between this and "your browser has memory."
+[`extension/`](extension/) removes it without changing what the standard allows: it registers the
+same five tools on every page you visit, so an agent helping you on `github.com` can reach what you
+recorded yesterday without being sent to the Memory Bus tab first.
+
+The extension stores nothing itself. Every call is forwarded to `bridge.html` on this origin, so it
+reads and writes the **same** IndexedDB this site displays — one memory, inspectable and deletable in
+one place. All sanitisation, injection flagging, envelopes and limit clamping stay in the modules
+here; the extension is transport only.
+
+See [`extension/README.md`](extension/README.md) to install it unpacked.
+
 ## Local development
 
 ```bash

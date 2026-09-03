@@ -1,0 +1,83 @@
+<!doctype html>
+<html>
+  <head>
+    <meta charset="utf-8" />
+    <title>Agent Memory Bus bridge</title>
+  </head>
+  <body>
+    <!--
+      Headless bridge into the memory store.
+
+      The companion extension registers WebMCP tools on every page you visit,
+      but a page on github.com cannot reach this origin's IndexedDB. The
+      extension loads this document in an offscreen frame instead: because it
+      is same-origin with the app, it reads and writes the *same* memory the
+      site's UI shows, so there is one store rather than an extension copy and
+      a website copy.
+
+      All sanitisation, injection flagging, envelopes and limit clamping stay
+      in memoryStore/webmcpTools — this file only moves messages.
+    -->
+    <script type="module">
+      import {
+        storeObservation,
+        retrieveRelevant,
+        getWorkingMemory,
+        linkConcepts,
+        summarizeContext,
+      } from "./src/lib/memoryStore.js";
+      import { untrustedEnvelope, boundOutput } from "./src/lib/sanitize.js";
+
+      /**
+       * Stored text re-entering an agent's context gets the same treatment it
+       * gets on the site's own tool path. Duplicating the shield here (rather
+       * than importing the registration module) keeps the bridge free of the
+       * `document.modelContext` assumptions that module makes.
+       */
+      const MAX_CONTENT_CHARS = 240;
+      const shield = (rows) =>
+        rows.map((row) => ({
+          ...row,
+          content: untrustedEnvelope(boundOutput(row.content, MAX_CONTENT_CHARS)),
+        }));
+
+      const handlers = {
+        store_observation: (args) => storeObservation(args),
+        retrieve_relevant: async (args) => shield(await retrieveRelevant(args)),
+        get_working_memory: async (args) => shield(await getWorkingMemory(args)),
+        link_concepts: (args) => linkConcepts(args),
+        summarize_context: async (args) => {
+          const digest = await summarizeContext(args);
+          return { ...digest, observations: shield(digest.observations) };
+        },
+      };
+
+      window.addEventListener("message", async (event) => {
+        const msg = event.data;
+        if (!msg || msg.channel !== "agent-memory-bus") return;
+
+        // Only extension contexts may drive the store. Without this check any
+        // website could frame this page and read or poison the user's memory.
+        if (!event.origin.startsWith("chrome-extension://")) return;
+
+        const reply = (payload) =>
+          event.source?.postMessage(
+            { channel: "agent-memory-bus", id: msg.id, ...payload },
+            event.origin,
+          );
+
+        const handler = handlers[msg.tool];
+        if (!handler) return reply({ error: `unknown tool: ${msg.tool}` });
+
+        try {
+          reply({ result: await handler(msg.args || {}) });
+        } catch (err) {
+          reply({ error: err instanceof Error ? err.message : String(err) });
+        }
+      });
+
+      // Tell the opener the store is ready to take commands.
+      parent?.postMessage({ channel: "agent-memory-bus", ready: true }, "*");
+    </script>
+  </body>
+</html>

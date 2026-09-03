@@ -1,0 +1,24 @@
+{
+  "manifest_version": 3,
+  "name": "Agent Memory Bus — ambient memory",
+  "version": "0.1.0",
+  "description": "Makes your browser-local agent memory reachable from every page, not just the Memory Bus tab.",
+  "permissions": ["offscreen", "storage"],
+  "host_permissions": ["https://abhishekjha18.github.io/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["relay.js"],
+      "run_at": "document_start"
+    },
+    {
+      "matches": ["<all_urls>"],
+      "js": ["register-tools.js"],
+      "run_at": "document_start",
+      "world": "MAIN"
+    }
+  ]
+}
