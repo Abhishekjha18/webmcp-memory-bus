@@ -82,6 +82,15 @@ export default function App() {
     }
   }
 
+  async function handleClearAll() {
+    const confirmed = window.confirm(
+      `Delete all ${observations.length} observations and ${relations.length} concept links? This cannot be undone.`,
+    );
+    if (!confirmed) return;
+    await clearAllMemory();
+    setSearchResults(null);
+  }
+
   async function handleSearch(e) {
     e.preventDefault();
     if (!query.trim()) return;
@@ -186,7 +195,7 @@ export default function App() {
         <section className="panel">
           <div className="panel-header">
             <h2>Stored observations ({observations.length})</h2>
-            <button className="ghost" onClick={clearAllMemory}>
+            <button className="ghost" onClick={handleClearAll}>
               Clear all
             </button>
           </div>
@@ -196,6 +205,17 @@ export default function App() {
               <li key={o.id}>
                 <div className="obs-content">{o.content}</div>
                 <div className="obs-meta">
+                  {o.flagged && (
+                    <>
+                      <span
+                        className="flag"
+                        title="This text matches prompt-injection patterns. It is stored and shown as-is, and is marked as untrusted content when returned to an agent."
+                      >
+                        ⚠ injection-flagged
+                      </span>
+                      {" · "}
+                    </>
+                  )}
                   {formatTime(o.timestamp)}
                   {o.source_url && (
                     <>

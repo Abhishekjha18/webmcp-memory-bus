@@ -171,6 +171,12 @@ ul {
   color: var(--accent);
 }
 
+.flag {
+  color: #f0b429;
+  font-weight: 600;
+  cursor: help;
+}
+
 .score {
   color: var(--accent);
   font-variant-numeric: tabular-nums;
