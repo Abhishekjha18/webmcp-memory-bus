@@ -84,20 +84,37 @@ and would re-do the work on every retrieval.
 
 ## Ranking
 
-`retrieve_relevant` is pure cosine similarity.
+`retrieve_relevant` is pure cosine similarity — no recency, no provenance.
+It exists for "find the closest match to this meaning," and blending in
+anything else would make that contract harder to reason about.
 
-`get_working_memory` blends in recency with an exponential half-life:
+`get_working_memory` blends in recency and provenance, both as bounded
+multiplicative floors rather than additive terms, so each factor's maximum
+possible influence is a fixed, statable percentage:
 
 ```js
-recencyWeight = 0.5 ** (ageHours / 72)          // 72h half-life
-score         = similarity * (0.7 + 0.3 * recencyWeight)
+recencyWeight    = 0.5 ** (ageHours / 72)             // 72h half-life
+provenanceWeight = author === "human" ? 1 : 0
+score            = similarity
+                 * (0.7  + 0.3  * recencyWeight)      // up to ±30%
+                 * (0.95 + 0.05 * provenanceWeight)    // up to ±5%
 ```
 
-The `0.7 +` floor is the load-bearing part: recency can lift a result by at most
-~43%, and can never drive a highly relevant old memory to zero. A pure
-multiplicative decay would make the store amnesic about anything from last month
-regardless of how relevant it is. Future timestamps clamp to age zero rather
-than scoring above 1.
+The `0.7 +` floor is the load-bearing part of recency: it can lift a result by
+at most ~43% relative to its floor, and can never drive a highly relevant old
+memory to zero. A pure multiplicative decay would make the store amnesic about
+anything from last month regardless of how relevant it is. Future timestamps
+clamp to age zero rather than scoring above 1.
+
+Provenance gets a deliberately smaller band than recency — half the swing.
+Recency is a strong, well-established signal that something is still
+relevant; authorship is a weaker signal about how much to *trust* a memory,
+not how relevant it is. A 5% nudge breaks a near-tie in favor of something the
+user typed themselves without letting it override a genuine relevance gap —
+a barely-relevant human note still loses to a highly relevant agent-recorded
+one. See
+[SECURITY.md](SECURITY.md#6-provenance-and-the-humanagent-trust-boundary) for
+why `author` cannot be supplied by the caller in the first place.
 
 ## Graph traversal
 

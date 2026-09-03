@@ -66,6 +66,13 @@ invisible: you cannot see what was saved on your behalf or why something was
 recalled. Here you watch it happen, and the five cards let you read, search and
 delete the store by hand.
 
+**You can tell your own memories from an agent's.** Every observation is
+badged `you`, `agent`, or `imported` depending on who actually wrote it, and
+the badge cannot be forged — an agent cannot claim `human` provenance by
+including it in a tool call, the boundary overrides it regardless. Retrieval
+gives your own notes a small edge on a close call, never enough to bury a
+more relevant fact the agent recorded.
+
 **It degrades gracefully.** The UI calls the memory layer directly rather than
 proxying through the tools, so the page is fully usable in a browser with no
 WebMCP support at all. The header states plainly whether tools registered.
@@ -148,8 +155,15 @@ Specifics worth calling out:
   handing that same agent a delete capability would let a planted memory talk it
   into destroying the real ones. Deletion is per-item in the UI, and export
   makes it recoverable.
+- **`author` is stamped by the boundary, never read from the agent's call.**
+  WebMCP's `inputSchema` is a hint to well-behaved clients, not an enforced
+  contract on `execute()` — nothing stops a call from including an
+  undocumented field. Both agent-facing entry points spread the caller's
+  arguments first and set `author: "agent"` after, so a forged
+  `author: "human"` is overwritten rather than trusted. Verified end-to-end
+  in a real browser, not just asserted in a unit test with a mock.
 
-**Verification.** 140 unit tests (Vitest + `fake-indexeddb`), a real-stack
+**Verification.** 152 unit tests (Vitest + `fake-indexeddb`), a real-stack
 integration suite that runs the actual tool registration path against the real
 transformers.js model and IndexedDB (12/12 passing), and repeated
 headless-browser checks against both the dev server and the production build.

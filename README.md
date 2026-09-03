@@ -105,7 +105,7 @@ npm run build
 npm test
 ```
 
-140 unit tests covering sanitization, store and ranking logic, graph traversal,
+152 unit tests covering sanitization, store and ranking logic, graph traversal,
 and the tool layer (registration, annotations, budgets, shielding, activity
 logging) against a mocked `modelContext` and an in-memory IndexedDB, plus a
 real-stack integration suite that runs the same tools against the actual

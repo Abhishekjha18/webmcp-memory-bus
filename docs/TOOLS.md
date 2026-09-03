@@ -43,7 +43,10 @@ Record something read, decided, or noticed.
 | `timestamp` | string | no | ISO 8601. Defaults to now. Accepts backdating. |
 | `tags` | string[] | no | Free-form topic tags. Defaults to `[]`. |
 
-Returns the stored record, including its assigned `id` and a `flagged` boolean.
+Returns the stored record, including its assigned `id`, a `flagged` boolean,
+and `author: "agent"` — set unconditionally by the tool boundary itself, not
+by anything in the arguments. See
+[SECURITY.md](SECURITY.md#6-provenance-and-the-humanagent-trust-boundary).
 
 Hidden codepoints are stripped from `content` and `tags` before storage.
 Injection-shaped text is **flagged, not altered** — see
@@ -83,9 +86,11 @@ Relevant *and* recent observations for what is happening right now.
 | `limit` | number | no | Default 5, hard-capped at 20. |
 
 Returns results carrying both `similarity` (pure cosine) and `score` (recency
-blended), so a caller can see how much recency moved a result. The recency
-half-life is 72 hours; see [ARCHITECTURE.md](ARCHITECTURE.md#ranking) for the
-formula and why the weight floors at 0.7 rather than decaying to zero.
+*and* provenance blended), so a caller can see how much each moved a result.
+The recency half-life is 72 hours; see
+[ARCHITECTURE.md](ARCHITECTURE.md#ranking) for the formula, why the recency
+weight floors at 0.7 rather than decaying to zero, and why a human-authored
+memory gets only a 5% edge, not a dominant one.
 
 Use this over `retrieve_relevant` when "what was I just doing" matters. Use
 `retrieve_relevant` when the age of a memory is irrelevant.

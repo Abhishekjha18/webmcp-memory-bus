@@ -11,10 +11,13 @@ observed rather than when it got around to storing it.
 `Xenova/all-MiniLM-L6-v2` running in the tab and ranks by cosine similarity.
 No embedding API, no network call per query, no text leaves the machine.
 
-**Recency-weighted working memory.** `get_working_memory` blends similarity with
-an exponential recency decay (72-hour half-life, weight floored at 0.7) so
-"what was I just doing" outranks an equally relevant note from last year,
-without burying old but highly relevant memories.
+**Recency- and provenance-weighted working memory.** `get_working_memory` blends
+similarity with an exponential recency decay (72-hour half-life, floored at
+0.7) so "what was I just doing" outranks an equally relevant note from last
+year, plus a smaller provenance nudge (floored at 0.95) that breaks a
+near-tie in favor of something the user typed themselves. Neither factor can
+bury a genuinely more relevant memory — both are bounded floors, not
+overrides.
 
 **Semantic concept graph.** `link_concepts` records typed, confidence-scored
 edges between entities in a store separate from the episodic log. Nodes are
@@ -46,6 +49,13 @@ and Clear all confirms before wiping. No agent tool can delete anything, so a
 planted memory cannot talk an agent into erasing the real ones — see
 [SECURITY.md](SECURITY.md#1-indirect-prompt-injection).
 
+**Provenance.** Every observation is tagged `human`, `agent`, or `imported`
+depending on which boundary actually wrote it, shown as a badge in the UI.
+`get_working_memory` gives human-authored memories a small ranking edge — a
+tie-breaker, not an override. The field cannot be forged: an agent including
+`author: "human"` in a tool call is overridden at the boundary, and an import
+file's claimed authorship is discarded in favor of `imported`, unconditionally.
+
 **Export and import.** The whole store round-trips as a JSON file, so memory is
 portable across browsers and machines and survives clearing site data. Imports
 are treated as untrusted input: records are re-sanitized and re-flagged, and
@@ -55,7 +65,7 @@ appended rather than overwriting.
 arguments and result or error, rendered in the UI. Useful for watching an agent
 actually use the store, and the reason a failing tool call is diagnosable at all.
 
-**140 unit tests** across sanitization, store logic, graph traversal and the
+**152 unit tests** across sanitization, store logic, graph traversal and the
 tool layer, plus a real-stack integration suite (12/12) that exercises the
 actual embedding model and IndexedDB rather than mocks, gating deploy in CI.
 

@@ -177,6 +177,42 @@ This is a known, unaddressed limitation, not a solved problem.
 
 ---
 
+## 6. Provenance and the human/agent trust boundary
+
+Every observation carries an `author`: `"human"` (typed into the form),
+`"agent"` (stored through a WebMCP tool call, on this origin or via the
+extension), or `"imported"` (restored from a file). This is used two ways:
+it is shown in the UI as a small badge, and `get_working_memory` gives a
+human-authored memory a modest edge when two candidates are otherwise close.
+
+**`author` is not a documented tool parameter, and is never trusted from raw
+caller input.** `inputSchema` is a hint to well-behaved clients, not an
+enforced runtime contract — nothing stops an agent's `execute()` call from
+including an undocumented `author: "human"` field alongside `content`. Both
+agent-facing boundaries (`webmcpTools.js`'s tool wrapper and `bridge.html`'s
+handler) spread the caller's args first and set `author` to `"agent"`
+afterward, so a forged value is overwritten, never read. Verified end-to-end
+in a real browser: an agent call including `author: "human"` in its arguments
+is stored and displayed as `agent`, not `human`.
+
+**A `store_observation` call bypassing both wrappers still cannot claim
+`"imported"`** — `coerceAuthor()` only recognizes `"human"`; anything else,
+including `"imported"` itself, falls back to `"agent"`. Only `importMemory`'s
+own record construction can set `"imported"`, and it does so unconditionally,
+discarding whatever the file's `author` field claims — otherwise a
+hand-crafted "export" could mark every record `author: "human"` and buy the
+ranking bonus that implies, exactly the kind of gaming this field exists to
+prevent.
+
+**The ranking effect is deliberately small.** `get_working_memory` bounds it
+to a 5% multiplier (half of what recency is allowed to move a score, which
+itself is bounded to 30%), so it can only break a near-tie — a genuinely more
+relevant agent-sourced memory still outranks a barely-relevant human one.
+`retrieve_relevant` applies no provenance weighting at all, matching its
+documented contract of pure semantic similarity.
+
+---
+
 ## What is deliberately not claimed
 
 - **That prompt injection is solved.** It is made visible and bounded. A planted
