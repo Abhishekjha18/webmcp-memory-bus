@@ -307,6 +307,135 @@ describe("superseding", () => {
   });
 });
 
+describe("write-time deduplication", () => {
+  it("returns merged: false for a genuinely new observation", async () => {
+    const rec = await storeObservation({ content: "a fresh, distinct thought" });
+    expect(rec.merged).toBe(false);
+  });
+
+  it("merges an exact repeat into the existing row rather than creating a new one", async () => {
+    const first = await storeObservation({ content: "the build is green" });
+    const second = await storeObservation({ content: "the build is green" });
+    expect(second.merged).toBe(true);
+    expect(second.id).toBe(first.id);
+    const all = await getAllObservationsForUI();
+    expect(all).toHaveLength(1);
+  });
+
+  it("merges across case, whitespace and trailing-punctuation variants", async () => {
+    const first = await storeObservation({ content: "The build is green." });
+    const second = await storeObservation({ content: "  the   build IS green  " });
+    expect(second.merged).toBe(true);
+    expect(second.id).toBe(first.id);
+  });
+
+  it("does not merge genuinely different content, even when short and structurally similar", async () => {
+    // The case that broke a naive cosine-similarity version of this
+    // feature: real embeddings score "filler observation 1" vs "2" as
+    // high as 0.99 — higher than some genuine near-duplicates. Text
+    // equality has no such false positive.
+    await storeObservation({ content: "filler observation 1" });
+    const second = await storeObservation({ content: "filler observation 2" });
+    expect(second.merged).toBe(false);
+    expect(await getAllObservationsForUI()).toHaveLength(2);
+  });
+
+  it("bumps the merged record's timestamp to the newer call", async () => {
+    const old = new Date(Date.now() - 60_000).toISOString();
+    await storeObservation({ content: "still true", timestamp: old });
+    const second = await storeObservation({ content: "still true" });
+    expect(second.timestamp).not.toBe(old);
+  });
+
+  it("unions tags across a merge rather than replacing them", async () => {
+    await storeObservation({ content: "shared fact", tags: ["a", "b"] });
+    const second = await storeObservation({ content: "shared fact", tags: ["b", "c"] });
+    expect(second.tags.sort()).toEqual(["a", "b", "c"]);
+  });
+
+  it("adopts a source_url on merge only if the original didn't have one", async () => {
+    await storeObservation({ content: "sourced fact" });
+    const second = await storeObservation({ content: "sourced fact", source_url: "https://example.com/a" });
+    expect(second.source_url).toBe("https://example.com/a");
+
+    await clearAllMemory();
+    await storeObservation({ content: "sourced fact", source_url: "https://example.com/original" });
+    const third = await storeObservation({ content: "sourced fact", source_url: "https://example.com/new" });
+    expect(third.source_url).toBe("https://example.com/original");
+  });
+
+  it("does not merge across different authors, even with identical content", async () => {
+    await storeObservation({ content: "shared wording", author: AUTHORS.AGENT });
+    const second = await storeObservation({ content: "shared wording", author: AUTHORS.HUMAN });
+    expect(second.merged).toBe(false);
+    expect(await getAllObservationsForUI()).toHaveLength(2);
+  });
+
+  it("does not merge outside the dedup time window", async () => {
+    // The exact scenario "prefers the recent of two equally similar
+    // observations" (in getWorkingMemory, below) depends on: a fact
+    // legitimately re-observed long after the first sighting must remain
+    // two distinct, separately-timestamped rows, not collapse into one.
+    const longAgo = new Date(Date.now() - 400 * 24 * 3600 * 1000).toISOString();
+    await storeObservation({ content: "recorded a long time ago", timestamp: longAgo });
+    const second = await storeObservation({ content: "recorded a long time ago" });
+    expect(second.merged).toBe(false);
+    expect(await getAllObservationsForUI()).toHaveLength(2);
+  });
+
+  it("does not treat a superseded observation as a dedup target", async () => {
+    const v1 = await storeObservation({ content: "outdated wording" });
+    await storeObservation({ content: "corrected wording", supersedes: v1.id });
+    // A later, unrelated call happening to repeat the RETIRED wording
+    // should not silently revive it by merging into it.
+    const third = await storeObservation({ content: "outdated wording" });
+    expect(third.merged).toBe(false);
+    expect(third.id).not.toBe(v1.id);
+  });
+
+  it("skips dedup entirely when supersedes is given, even for identical content", async () => {
+    const original = await storeObservation({ content: "same wording" });
+    const replacement = await storeObservation({ content: "same wording", supersedes: original.id });
+    expect(replacement.merged).toBe(false);
+    expect(replacement.id).not.toBe(original.id);
+    expect(replacement.supersedes).toBe(original.id);
+  });
+
+  it("re-importing the same file merges into the earlier import instead of duplicating it", async () => {
+    await storeObservation({ content: "seed", author: AUTHORS.AGENT }); // unrelated control row
+    const first = await importMemory({
+      version: 1,
+      observations: [{ content: "backed-up fact", timestamp: "2024-01-01T00:00:00.000Z" }],
+      relations: [],
+    });
+    expect(first).toMatchObject({ observations: 1, merged: 0 });
+
+    const second = await importMemory({
+      version: 1,
+      observations: [{ content: "backed-up fact", timestamp: "2024-01-01T00:00:00.000Z" }],
+      relations: [],
+    });
+    expect(second).toMatchObject({ observations: 0, merged: 1 });
+
+    const stored = (await getAllObservationsForUI()).filter((o) => o.content === "backed-up fact");
+    expect(stored).toHaveLength(1);
+  });
+
+  it("does not let an import merge into a real agent- or human-authored observation", async () => {
+    await storeObservation({ content: "shared text", author: AUTHORS.AGENT });
+    const result = await importMemory({
+      version: 1,
+      observations: [{ content: "shared text" }],
+      relations: [],
+    });
+    // author is always coerced to "imported", which never equals "agent",
+    // so this cannot merge into the real one — it must land as a new row.
+    expect(result).toMatchObject({ observations: 1, merged: 0 });
+    const stored = (await getAllObservationsForUI()).filter((o) => o.content === "shared text");
+    expect(stored).toHaveLength(2);
+  });
+});
+
 describe("retrieveRelevant", () => {
   it("ranks a lexically overlapping observation above an unrelated one", async () => {
     await storeObservation({ content: "kubernetes cluster autoscaling behaviour" });
@@ -361,6 +490,40 @@ describe("retrieveRelevant", () => {
     await storeObservation({ content: "alpha beta gamma", author: AUTHORS.HUMAN });
     const [first, second] = await retrieveRelevant({ query: "alpha beta gamma" });
     expect(first.score).toBe(second.score);
+  });
+
+  it("scopes results to observations carrying at least one requested tag", async () => {
+    await storeObservation({ content: "infra deploy notes", tags: ["infra"] });
+    await storeObservation({ content: "infra deploy notes about something else", tags: ["frontend"] });
+    const results = await retrieveRelevant({ query: "deploy notes", tags: ["infra"] });
+    expect(results).toHaveLength(1);
+    expect(results[0].tags).toContain("infra");
+  });
+
+  it("matches tags case-insensitively", async () => {
+    await storeObservation({ content: "deploy notes", tags: ["Infra"] });
+    const results = await retrieveRelevant({ query: "deploy", tags: ["infra"] });
+    expect(results).toHaveLength(1);
+  });
+
+  it("matches on ANY requested tag, not all of them", async () => {
+    await storeObservation({ content: "note a", tags: ["infra"] });
+    await storeObservation({ content: "note b", tags: ["frontend"] });
+    await storeObservation({ content: "note c", tags: ["backend"] });
+    const results = await retrieveRelevant({ query: "note", tags: ["infra", "frontend"] });
+    expect(results.map((r) => r.content).sort()).toEqual(["note a", "note b"]);
+  });
+
+  it("returns an empty array when nothing carries the requested tag", async () => {
+    await storeObservation({ content: "untagged note" });
+    expect(await retrieveRelevant({ query: "note", tags: ["nonexistent-tag"] })).toEqual([]);
+  });
+
+  it("treats a missing, empty, or malformed tags value as no filter", async () => {
+    await storeObservation({ content: "a plain note", tags: ["x"] });
+    expect(await retrieveRelevant({ query: "note" })).toHaveLength(1);
+    expect(await retrieveRelevant({ query: "note", tags: [] })).toHaveLength(1);
+    expect(await retrieveRelevant({ query: "note", tags: "not-an-array" })).toHaveLength(1);
   });
 });
 
@@ -435,6 +598,20 @@ describe("getWorkingMemory", () => {
 
   it("rejects a missing current_task", async () => {
     await expect(getWorkingMemory({})).rejects.toThrow(/current_task is required/);
+  });
+
+  it("scopes results to observations carrying at least one requested tag", async () => {
+    await storeObservation({ content: "infra task notes", tags: ["infra"] });
+    await storeObservation({ content: "infra task notes on frontend", tags: ["frontend"] });
+    const results = await getWorkingMemory({ current_task: "task notes", tags: ["infra"] });
+    expect(results).toHaveLength(1);
+    expect(results[0].tags).toContain("infra");
+  });
+
+  it("treats a missing or malformed tags value as no filter", async () => {
+    await storeObservation({ content: "a plain note", tags: ["x"] });
+    expect(await getWorkingMemory({ current_task: "note" })).toHaveLength(1);
+    expect(await getWorkingMemory({ current_task: "note", tags: [] })).toHaveLength(1);
   });
 });
 

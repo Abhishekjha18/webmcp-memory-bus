@@ -38,6 +38,85 @@ function coerceAuthor(author) {
   return author === AUTHORS.HUMAN ? AUTHORS.HUMAN : AUTHORS.AGENT;
 }
 
+// Bounds the dedup check to a short burst, not the whole store's history.
+// The target failure mode is an agent restating the same thing many times
+// in a loop; a fact legitimately re-observed months later is a different,
+// legitimate case — get_working_memory's recency ranking exists precisely
+// to handle two real, separately-timestamped occurrences of the same fact,
+// and a global dedup scan would collapse that distinction away.
+const DEDUP_WINDOW_MS = 5 * 60 * 1000;
+
+/**
+ * Normalize text for exact-duplicate comparison: case-folded, trimmed,
+ * internal whitespace collapsed, trailing punctuation stripped.
+ *
+ * This is deliberately NOT semantic similarity, after actually measuring
+ * what that would mean: an early version compared embeddings by cosine
+ * similarity, calibrated against real near-duplicates (a punctuation-only
+ * variant scored ~0.98, a case-only variant ~0.96). But measuring it
+ * against a realistic enumerated pattern — "filler observation 0" through
+ * "23", the kind of thing a loop-tracking agent might actually write —
+ * found pairs scoring as high as 0.99, HIGHER than some of the genuine
+ * variants above. No single threshold separates "the same fact restated"
+ * from "meaningfully different short observations that happen to share
+ * most of their words": short sentence embeddings compress into a tight
+ * cluster regardless of whether the differing detail is the whole point.
+ * Normalized text equality is a strictly narrower, fully predictable net —
+ * it catches an agent restating identical text, or a byte-identical
+ * re-import, with no risk of folding two genuinely different observations
+ * into one.
+ */
+function normalizeForDedup(text) {
+  return text
+    .toLowerCase()
+    .trim()
+    .replace(/\s+/g, " ")
+    .replace(/[.!?;:,]+$/, "");
+}
+
+/**
+ * Find an existing, eligible exact-duplicate (after normalization) of a
+ * not-yet-written observation, or null.
+ *
+ * Eligibility requires the SAME author, not just a compatible one — this
+ * sidesteps the whole human/agent trust question that supersedes has to
+ * navigate. An agent's restated fact can only ever merge into another
+ * agent-authored row, never a human's, so dedup can't become a second,
+ * quieter way to touch someone else's memory.
+ */
+async function findDedupTarget(store, { normalizedContent, author, timestampMs }) {
+  const all = await store.getAll();
+  for (const candidate of all) {
+    if (candidate.author !== author) continue;
+    // A superseded record is deliberately retired; dedup should not
+    // quietly revive it by bumping its recency back to "current."
+    if (candidate.supersededBy != null) continue;
+    if (normalizeForDedup(candidate.content) !== normalizedContent) continue;
+    const candidateMs = new Date(candidate.timestamp).getTime();
+    if (!Number.isFinite(candidateMs) || Math.abs(candidateMs - timestampMs) > DEDUP_WINDOW_MS) {
+      continue;
+    }
+    return candidate;
+  }
+  return null;
+}
+
+/**
+ * Fold new metadata into a dedup target rather than creating a new row.
+ * Content, author, flagged status and any supersede relationship are left
+ * exactly as they were — a dedup match means the content is already
+ * effectively the same, so only "still being observed" metadata (recency,
+ * tags, a missing source) is refreshed.
+ */
+function mergeDedupTarget(target, { timestamp, tags, source_url }) {
+  return {
+    ...target,
+    timestamp,
+    tags: Array.from(new Set([...(target.tags || []), ...tags])),
+    source_url: target.source_url || source_url || null,
+  };
+}
+
 export async function storeObservation({
   content,
   source_url,
@@ -53,11 +132,36 @@ export async function storeObservation({
   const cleanTags = (tags || []).map((t) => sanitizeText(String(t)));
   const flagged = scanForInjection(cleanContent);
   const cleanAuthor = coerceAuthor(author);
+  const cleanTimestamp = coerceTimestamp(timestamp);
   const embedding = await embed(cleanContent);
 
   const db = await getDB();
   const tx = db.transaction(OBSERVATIONS_STORE, "readwrite");
   const store = tx.objectStore(OBSERVATIONS_STORE);
+
+  // Dedup is skipped entirely when supersedes is given: that call already
+  // signals "this is deliberately a new, distinct record," and silently
+  // merging it away would mean the target it names never actually gets
+  // marked superseded.
+  const supersedesRequested = Number.isFinite(Number(supersedes));
+  if (!supersedesRequested) {
+    const dedupTarget = await findDedupTarget(store, {
+      normalizedContent: normalizeForDedup(cleanContent),
+      author: cleanAuthor,
+      timestampMs: new Date(cleanTimestamp).getTime(),
+    });
+    if (dedupTarget) {
+      const merged = mergeDedupTarget(dedupTarget, {
+        timestamp: cleanTimestamp,
+        tags: cleanTags,
+        source_url,
+      });
+      await store.put(merged);
+      await tx.done;
+      notify();
+      return { ...merged, merged: true };
+    }
+  }
 
   // Resolve the supersede target inside the same transaction as the write,
   // before the new record exists, so an invalid reference is never stored
@@ -83,7 +187,7 @@ export async function storeObservation({
   const record = {
     content: cleanContent,
     source_url: source_url || null,
-    timestamp: coerceTimestamp(timestamp),
+    timestamp: cleanTimestamp,
     tags: cleanTags,
     flagged,
     author: cleanAuthor,
@@ -99,7 +203,7 @@ export async function storeObservation({
 
   await tx.done;
   notify();
-  return { id, ...record };
+  return { id, ...record, merged: false };
 }
 
 async function allObservations() {
@@ -149,13 +253,31 @@ function ageHoursOrNull(timestamp, now) {
   return Math.max(0, (now - t) / 3_600_000);
 }
 
-export async function retrieveRelevant({ query, task_context = "", limit = 5 }) {
+/**
+ * Narrow a pool of observations to those carrying at least one of the
+ * requested tags, case-insensitively. `tags` is a courtesy filter, not a
+ * required contract — anything other than a non-empty array (missing,
+ * wrong type, empty) is treated as "no filter" rather than an error, and
+ * an unmatched filter returns an empty pool rather than throwing.
+ *
+ * Applied before ranking, not after: fewer candidates to embed-compare
+ * against, and a caller scoping to a tag gets an answer only about that
+ * tag's observations, not a global top-N with off-topic results crowded
+ * in ahead of an on-topic one further down.
+ */
+function filterByTags(observations, tags) {
+  if (!Array.isArray(tags) || tags.length === 0) return observations;
+  const wanted = new Set(tags.map((t) => String(t).toLowerCase()));
+  return observations.filter((obs) => (obs.tags || []).some((t) => wanted.has(t.toLowerCase())));
+}
+
+export async function retrieveRelevant({ query, task_context = "", limit = 5, tags }) {
   if (!query || typeof query !== "string") {
     throw new Error("query is required and must be a string");
   }
   const combined = task_context ? `${query}\n${task_context}` : query;
   const queryEmbedding = await embed(combined);
-  const observations = await allObservations();
+  const observations = filterByTags(await allObservations(), tags);
   const ranked = observations
     .map((obs) => ({ ...obs, score: cosineSimilarity(queryEmbedding, obs.embedding) }))
     .sort((a, b) => b.score - a.score)
@@ -164,12 +286,12 @@ export async function retrieveRelevant({ query, task_context = "", limit = 5 }) 
   return ranked;
 }
 
-export async function getWorkingMemory({ current_task, limit = 5, recencyHalfLifeHours = 72 }) {
+export async function getWorkingMemory({ current_task, limit = 5, recencyHalfLifeHours = 72, tags }) {
   if (!current_task || typeof current_task !== "string") {
     throw new Error("current_task is required and must be a string");
   }
   const queryEmbedding = await embed(current_task);
-  const observations = await allObservations();
+  const observations = filterByTags(await allObservations(), tags);
   const now = Date.now();
   const ranked = observations
     .map((obs) => {
@@ -473,6 +595,7 @@ export async function importMemory(data) {
 
   const db = await getDB();
   let importedObservations = 0;
+  let mergedObservations = 0;
   let importedRelations = 0;
   let skipped = 0;
 
@@ -489,11 +612,35 @@ export async function importMemory(data) {
     // Re-embed when the vector is unusable, or when sanitizing changed the
     // text out from under it.
     const embedding = valid && content === raw.content ? raw.embedding : await embed(content);
-    await db.add(OBSERVATIONS_STORE, {
+    const timestamp = coerceTimestamp(raw.timestamp);
+    const tags = Array.isArray(raw.tags) ? raw.tags.map((t) => sanitizeText(String(t))) : [];
+    const source_url = typeof raw.source_url === "string" ? raw.source_url : null;
+
+    // Own transaction per record: a per-record dedup lookup needs a read
+    // before its write, same reasoning as storeObservation's supersede
+    // resolution. Re-importing the same file — the exact bug this closes —
+    // now merges into the earlier import's rows (same author: "imported",
+    // same timestamps, since both came from the same source file) instead
+    // of duplicating them.
+    const tx = db.transaction(OBSERVATIONS_STORE, "readwrite");
+    const store = tx.objectStore(OBSERVATIONS_STORE);
+    const dedupTarget = await findDedupTarget(store, {
+      normalizedContent: normalizeForDedup(content),
+      author: AUTHORS.IMPORTED,
+      timestampMs: new Date(timestamp).getTime(),
+    });
+    if (dedupTarget) {
+      await store.put(mergeDedupTarget(dedupTarget, { timestamp, tags, source_url }));
+      await tx.done;
+      mergedObservations++;
+      continue;
+    }
+
+    await store.add({
       content,
-      source_url: typeof raw.source_url === "string" ? raw.source_url : null,
-      timestamp: coerceTimestamp(raw.timestamp),
-      tags: Array.isArray(raw.tags) ? raw.tags.map((t) => sanitizeText(String(t))) : [],
+      source_url,
+      timestamp,
+      tags,
       flagged: scanForInjection(content),
       // Always "imported", regardless of what raw.author claims. A file is
       // untrusted input; if this trusted whatever author value it carried,
@@ -513,6 +660,7 @@ export async function importMemory(data) {
       supersededBy: null,
       embedding,
     });
+    await tx.done;
     importedObservations++;
   }
 
@@ -538,5 +686,10 @@ export async function importMemory(data) {
   }
 
   notify();
-  return { observations: importedObservations, relations: importedRelations, skipped };
+  return {
+    observations: importedObservations,
+    merged: mergedObservations,
+    relations: importedRelations,
+    skipped,
+  };
 }
