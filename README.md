@@ -103,6 +103,8 @@ before building, and only a green run on `main` publishes to GitHub Pages.
 | [docs/TOOLS.md](docs/TOOLS.md) | Per-tool schemas, annotations, errors, text budgets. |
 | [docs/SECURITY.md](docs/SECURITY.md) | Threat model, injection defenses, and what is deliberately not claimed. |
 | [docs/FEATURES.md](docs/FEATURES.md) | What is built and working, and honest limitations. |
+| [docs/DEVPOST.md](docs/DEVPOST.md) | Submission write-up: why this fits WebMCP, and what it changes. |
+| [docs/DEMO_SCRIPT.md](docs/DEMO_SCRIPT.md) | Walkthrough script for the demo video. |
 
 ## License
 
