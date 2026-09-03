@@ -257,10 +257,21 @@ export default function App() {
             </p>
           </div>
         </div>
-        <span className={`status-pill status-${webmcpStatus}`}>
-          <span className="status-dot" aria-hidden="true" />
-          {statusLabel}
-        </span>
+        <div className="status-block">
+          <span className={`status-pill status-${webmcpStatus}`}>
+            <span className="status-dot" aria-hidden="true" />
+            {statusLabel}
+          </span>
+          {/* A judge who opens this URL without the flag would otherwise see
+              a dead status and no way to reach the actual feature. */}
+          {webmcpStatus === "unavailable" && (
+            <p className="status-help">
+              This browser has not enabled WebMCP. In Chrome 149+, set{" "}
+              <code>chrome://flags/#enable-webmcp-testing</code> to Enabled and relaunch — the
+              memory below works either way.
+            </p>
+          )}
+        </div>
       </header>
 
       <div className="stats">
