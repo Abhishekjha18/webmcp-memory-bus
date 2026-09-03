@@ -62,6 +62,19 @@ server, the person who owns the browser is the only party that can
 authoritatively reject a memory. Everything above it is defense in depth that
 makes a planted memory *legible* rather than impossible.
 
+**Deletion is deliberately human-only.** There is no `forget_observation` tool,
+and adding one would be a mistake. Retrieval already replays attacker-influenced
+text into an agent's context; if that agent also held a deletion capability, a
+planted memory could instruct it to erase the genuine ones, turning a
+context-poisoning attack into destructive data loss. So the asymmetry is
+deliberate: **agents write, only humans erase.** Every observation and concept
+link carries a delete control in the UI, and export exists so that removing
+something is recoverable from a file the user holds.
+
+That asymmetry is also why the flag badge is worth having. A control the human
+cannot act on is decoration; pairing detection with per-item deletion is what
+makes layer 7 an actual backstop rather than a label.
+
 **Note on layer 3 vs. layer 4.** Hidden characters are stripped; injection-shaped
 *text* is flagged but stored verbatim. This is deliberate. An observation is a
 record of what an agent actually read — silently rewriting it would make the
@@ -117,8 +130,18 @@ warns to the console at registration if a future edit blows a budget.
   reveals that *someone* loaded this page; it carries no stored content.
 - **IndexedDB is not encrypted.** Anything stored is readable by any script that
   runs on this origin and by anyone with access to the browser profile on disk.
-  Do not store secrets here. The Clear all button is the deletion mechanism, and
-  it now requires confirmation because it is irreversible.
+  Do not store secrets here.
+- **Deletion**: per-item delete controls remove a single observation or concept
+  link; Clear all wipes everything and asks first, because it is irreversible.
+- **Export files are plaintext JSON** containing every observation. They are as
+  sensitive as the store itself — an exported file leaves the browser's origin
+  sandbox entirely, so treat it like any other unencrypted notes file.
+- **Imported files are untrusted.** An import may have been hand-edited or come
+  from someone else, so every record is re-sanitized and re-scanned for
+  injection signatures on the way in, exactly like agent-written content.
+  Malformed records are skipped rather than aborting the import, and records are
+  appended rather than overwriting, so an import cannot silently destroy an
+  existing memory.
 
 ---
 

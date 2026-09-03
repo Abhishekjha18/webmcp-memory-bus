@@ -34,6 +34,16 @@ detail and honest limits in [SECURITY.md](SECURITY.md).
 calls `memoryStore` directly. Store, search, browse and clear all work in a
 browser with no WebMCP support at all, which is also how the app is testable.
 
+**Human-only deletion.** Every observation and concept link has a delete control,
+and Clear all confirms before wiping. No agent tool can delete anything, so a
+planted memory cannot talk an agent into erasing the real ones — see
+[SECURITY.md](SECURITY.md#1-indirect-prompt-injection).
+
+**Export and import.** The whole store round-trips as a JSON file, so memory is
+portable across browsers and machines and survives clearing site data. Imports
+are treated as untrusted input: records are re-sanitized and re-flagged, and
+appended rather than overwriting.
+
 **Live tool activity log.** Every tool invocation is timed and logged with its
 arguments and result or error, rendered in the UI. Useful for watching an agent
 actually use the store, and the reason a failing tool call is diagnosable at all.
@@ -72,18 +82,16 @@ documents well. Observations are embedded whole, so a long observation gets one
 averaged vector and retrieves fuzzily.
 
 **First load is slow.** ~25MB of WASM and model weights download before the
-first embedding resolves. Cached thereafter, but the first store or search on a
-cold profile takes noticeably long. There is a progress callback plumbed through
-`embeddings.js` but the UI does not currently surface a progress bar.
+first embedding resolves. A progress bar reports the aggregate percentage while
+it happens, and it is cached afterwards, but the first store or search on a cold
+profile still takes noticeably long.
 
-**No multi-user or multi-device story.** Memory is per-origin, per-browser
-profile. No sync, no export, no import, no accounts. Clearing site data destroys
-everything with no backup.
+**No sync or accounts.** Memory is per-origin, per-browser profile. Moving it
+between browsers or machines is a manual export/import, not sync, and there is
+no merge or conflict resolution — an import appends.
 
-**No editing or per-item deletion.** An observation can be stored and everything
-can be cleared. There is no way to fix a typo, delete one planted memory, or
-remove a single bad concept edge — which is a real gap given that flagging
-injected content is only useful if you can then act on it.
+**No editing.** An observation can be stored and deleted, but not amended. Fixing
+a typo means deleting and re-storing, which loses the original timestamp.
 
 **Concept graph is recorded, not reasoned over.** `link_concepts` stores edges
 and `summarize_context` returns them, but nothing traverses the graph. There is

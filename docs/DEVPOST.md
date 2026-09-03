@@ -80,10 +80,11 @@ browser profile, not to a vendor account, so switching assistants does not reset
 what you know. This is the part that was genuinely not possible before: there
 was no way for an arbitrary agent to reach a user-owned local store.
 
-**Memory the user can audit and correct.** Because the store is local and
-visible, a person can read exactly what an agent recorded, and delete it. That
-inverts the usual arrangement, where memory is written about you, server-side,
-and surfaced only when the system chooses to.
+**Memory the user can audit, correct and carry away.** Because the store is local
+and visible, a person can read exactly what an agent recorded, delete any single
+item, and export the whole thing to a JSON file that imports into another
+browser. That inverts the usual arrangement, where memory is written about you,
+server-side, portable nowhere, and surfaced only when the system chooses to.
 
 **A shared, inspectable working set.** Human and agent write into the same store
 through different doors — the human through the form, the agent through
@@ -133,6 +134,11 @@ Specifics worth calling out:
 - **`exposedTo` is deliberately omitted** — these tools mutate the user's own
   memory, so the default audience is already the intended one and an allowlist
   could only widen it.
+- **There is no deletion tool, on purpose.** Agents write; only humans erase.
+  Retrieval already replays attacker-influenced text into an agent's context, so
+  handing that same agent a delete capability would let a planted memory talk it
+  into destroying the real ones. Deletion is per-item in the UI, and export
+  makes it recoverable.
 
 **Verification.** 89 unit tests (Vitest + `fake-indexeddb`) and a 42-check
 headless-browser suite that drives the real registered tools, both passing

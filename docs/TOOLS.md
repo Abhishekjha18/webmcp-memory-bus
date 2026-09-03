@@ -22,6 +22,13 @@ the calling agent did not write. See [SECURITY.md](SECURITY.md).
 No tool declares `exposedTo`. These mutate the user's own memory store; the
 default audience — an agent interacting with this page — is the intended one.
 
+**There is no deletion tool, deliberately.** Agents can write memories but not
+remove them. Since retrieval already replays attacker-influenced text into an
+agent's context, pairing that with a deletion capability would let a planted
+memory instruct an agent to erase the genuine ones. Deleting is a human action,
+available per-item in the UI. See
+[SECURITY.md](SECURITY.md#1-indirect-prompt-injection).
+
 ---
 
 ## `store_observation`
