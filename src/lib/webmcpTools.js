@@ -5,8 +5,20 @@ import {
   linkConcepts,
   summarizeContext,
   exploreConcepts,
+  AUTHORS,
 } from "./memoryStore";
 import { untrustedEnvelope, boundOutput } from "./sanitize";
+
+/**
+ * `author` is not a documented tool parameter, but nothing stops a caller
+ * from including it in args anyway — inputSchema is a hint to well-behaved
+ * clients, not an enforced contract on execute(). Spreading args first and
+ * overriding after means an agent claiming `author: "human"` gets
+ * overwritten rather than believed, no matter what it sends.
+ */
+async function storeObservationFromTool(args) {
+  return storeObservation({ ...args, author: AUTHORS.AGENT });
+}
 
 const activityListeners = new Set();
 
@@ -117,7 +129,7 @@ const TOOL_SPECS = [
       },
       required: ["content"],
     },
-    handler: storeObservation,
+    handler: storeObservationFromTool,
   },
   {
     name: "retrieve_relevant",

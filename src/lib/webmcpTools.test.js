@@ -21,6 +21,7 @@ vi.mock("./memoryStore", () => ({
     edges: [{ entity1: "postgres", entity2: "rollback", relation: "requires", confidence: 1 }],
     observations: [{ id: 5, content: "connected observation" }],
   })),
+  AUTHORS: { HUMAN: "human", AGENT: "agent", IMPORTED: "imported" },
 }));
 
 const {
@@ -269,6 +270,36 @@ describe("untrusted content shielding", () => {
   });
 });
 
+describe("store_observation provenance", () => {
+  let ctx;
+
+  beforeEach(() => {
+    ctx = makeModelContext();
+    globalThis.document = { modelContext: ctx };
+    registerMemoryBusTools();
+  });
+
+  it("forces author: agent regardless of what the caller sends", async () => {
+    await ctx.registered.get("store_observation").spec.execute({ content: "hi" });
+    expect(storeObservation).toHaveBeenCalledWith(expect.objectContaining({ author: "agent" }));
+  });
+
+  it("overrides a forged author: human in the call arguments", async () => {
+    // An agent has no documented way to set author, but nothing stops it
+    // from including the field anyway — inputSchema is not an enforced
+    // runtime contract. The tool wrapper must win this, not the caller.
+    await ctx.registered.get("store_observation").spec.execute({ content: "hi", author: "human" });
+    expect(storeObservation).toHaveBeenCalledWith(expect.objectContaining({ author: "agent" }));
+    expect(storeObservation).not.toHaveBeenCalledWith(expect.objectContaining({ author: "human" }));
+  });
+
+  it("does not let author leak into the tool's documented schema", () => {
+    const spec = TOOL_SPECS.find((s) => s.name === "store_observation");
+    expect(spec.inputSchema.properties.author).toBeUndefined();
+    expect(spec.inputSchema.required).not.toContain("author");
+  });
+});
+
 describe("activity logging", () => {
   let ctx;
 
@@ -311,7 +342,9 @@ describe("activity logging", () => {
 
   it("defaults missing args to an empty object", async () => {
     await ctx.registered.get("store_observation").spec.execute();
-    expect(storeObservation).toHaveBeenCalledWith({});
+    // author: "agent" is always injected by storeObservationFromTool, even
+    // with no args at all — see the "provenance" describe block below.
+    expect(storeObservation).toHaveBeenCalledWith({ author: "agent" });
   });
 
   it("stops delivering events after unsubscribe", async () => {
