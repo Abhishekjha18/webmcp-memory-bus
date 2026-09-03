@@ -126,6 +126,10 @@ const TOOL_SPECS = [
           items: { type: "string" },
           description: "Free-form topic tags.",
         },
+        supersedes: {
+          type: "number",
+          description: "Id of an older observation this one retires, if any.",
+        },
       },
       required: ["content"],
     },

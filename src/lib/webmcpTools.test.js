@@ -298,6 +298,19 @@ describe("store_observation provenance", () => {
     expect(spec.inputSchema.properties.author).toBeUndefined();
     expect(spec.inputSchema.required).not.toContain("author");
   });
+
+  it("declares supersedes as an optional documented parameter", () => {
+    const spec = TOOL_SPECS.find((s) => s.name === "store_observation");
+    expect(spec.inputSchema.properties.supersedes).toBeDefined();
+    expect(spec.inputSchema.required).not.toContain("supersedes");
+  });
+
+  it("passes supersedes through unmodified, unlike author", async () => {
+    await ctx.registered.get("store_observation").spec.execute({ content: "hi", supersedes: 7 });
+    expect(storeObservation).toHaveBeenCalledWith(
+      expect.objectContaining({ supersedes: 7, author: "agent" }),
+    );
+  });
 });
 
 describe("activity logging", () => {

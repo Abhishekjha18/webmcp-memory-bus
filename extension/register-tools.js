@@ -58,6 +58,10 @@
           source_url: { type: "string", description: "URL the observation came from." },
           timestamp: { type: "string", description: "ISO timestamp; defaults to now." },
           tags: { type: "array", items: { type: "string" }, description: "Free-form topic tags." },
+          supersedes: {
+            type: "number",
+            description: "Id of an older observation this one retires, if any.",
+          },
         },
         required: ["content"],
       },
