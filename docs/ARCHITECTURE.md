@@ -43,6 +43,14 @@ and memoizes the connection promise. Three object stores:
 | `concepts` | `name` | — | semantic graph nodes (upserted) |
 | `relations` | `id` (auto) | `entity1`, `entity2` | semantic graph edges |
 
+`db.js` also exposes `getStorageEstimate()`, a thin wrapper over
+`navigator.storage.estimate()` that degrades to `{ supported: false }` on a
+browser that lacks it (older Safari, some private-browsing modes) rather
+than throwing. The UI polls it alongside every other refresh and shows an
+approximate usage figure in the footer — genuinely approximate, since the
+spec permits a browser to pad or round the numbers to resist
+fingerprinting.
+
 This is the dual-graph shape: an **episodic** log of what was observed, and a
 **semantic** graph of how entities relate. They are queried independently and
 joined only at summarization time, and — via `explore_concepts` — at traversal
@@ -130,6 +138,49 @@ this, only outranked; see
 [SECURITY.md](SECURITY.md#7-superseding-and-the-stealth-suppression-risk-it-opens)
 for why the write path that sets `supersededBy` is restricted the same way
 deletion is.
+
+## Write-time deduplication
+
+`store_observation` checks for an exact duplicate before creating a new
+row, and merges into it instead when found — bumping its timestamp,
+unioning its tags, adopting a `source_url` only if it lacked one. The
+duplicate check is **normalized text equality**, not embedding similarity,
+which was the first design tried and measurably wrong: real MiniLM
+embeddings scored an enumerated pattern ("filler observation 1" vs "2") as
+high as 0.99, above several genuine near-duplicates used to calibrate a
+0.95 threshold. See
+[SECURITY.md §8](SECURITY.md#8-write-time-deduplication-a-design-pivot-not-a-tuning-choice)
+for the measurement that forced the pivot.
+
+```js
+normalize(text) = text.toLowerCase().trim()
+                       .replace(/\s+/g, " ")        // collapse whitespace
+                       .replace(/[.!?;:,]+$/, "")   // strip trailing punctuation
+```
+
+A candidate is eligible only if it shares the new observation's exact
+`author`, is not itself superseded, and its own `timestamp` falls within 5
+minutes of the new observation's — narrow enough to catch an agent
+restating something moments ago, wide enough to be useless as a way to
+quietly resurface something from long before. `supersedes` bypasses dedup
+entirely: that parameter already asserts "this is a new, distinct record,"
+and merging it away would mean the target it names never gets marked
+superseded. `importMemory` runs the identical check per record, which is
+what turns a repeated import of the same backup file into a merge instead
+of a duplicate — both copies share `author: "imported"` and, for a
+byte-identical re-import, the same source timestamp.
+
+## Tag-scoped retrieval
+
+`retrieve_relevant` and `get_working_memory` both accept an optional
+`tags` array. When given, the observation pool is filtered — case-
+insensitive, matching any one of the requested tags — *before* ranking,
+not after: fewer candidates to embed-compare, and a caller scoping to a
+tag gets an answer about that tag's observations specifically, rather than
+a global top-N that a scoped result got crowded out of. An empty, missing,
+or non-array `tags` value is treated as no filter, matching this codebase's
+established pattern of coercing an optional parameter rather than
+rejecting it.
 
 ## Graph traversal
 

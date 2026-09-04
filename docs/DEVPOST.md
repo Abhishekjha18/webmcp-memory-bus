@@ -80,6 +80,12 @@ it had been retracted. Superseding an observation keeps it visible, struck
 through, for audit, but cuts its ranking so an agent working from
 `get_working_memory` stops confidently acting on what you already corrected.
 
+**An agent looping doesn't flood its own memory.** Restating the same thing
+twice, moments apart — an agent retry, a re-imported backup — merges into
+the existing observation instead of filling the store with copies. Search
+also narrows by tag now, so "what do I know about deploys" and "what do I
+know, tagged infra" are two different, useful questions.
+
 **It degrades gracefully.** The UI calls the memory layer directly rather than
 proxying through the tools, so the page is fully usable in a browser with no
 WebMCP support at all. The header states plainly whether tools registered.
@@ -176,10 +182,18 @@ Specifics worth calling out:
   all. It doesn't close every angle: one agent-sourced memory can still
   supersede another unchecked, disclosed rather than hidden in
   `docs/SECURITY.md`.
+- **Dedup measured its own threshold and changed course.** The first
+  version compared embeddings by cosine similarity; run against real
+  content it scored two genuinely different observations ("filler
+  observation 1" vs "2") at 0.99 — higher than several actual near-
+  duplicates used to calibrate the threshold. No single number separated
+  the two cases, so it ships as normalized text equality instead: no
+  false-positive mode, verified against the same real content that broke
+  the first version. Full account in `docs/SECURITY.md §8`.
 
-**Verification.** 169 unit tests (Vitest + `fake-indexeddb`), a real-stack
+**Verification.** 194 unit tests (Vitest + `fake-indexeddb`), a real-stack
 integration suite that runs the actual tool registration path against the real
-transformers.js model and IndexedDB (14/14 passing), and repeated
+transformers.js model and IndexedDB (17/17 passing), and repeated
 headless-browser checks against both the dev server and the production build.
 Lint and tests gate deployment in CI. The threat model in `docs/SECURITY.md`
 states what is *not* claimed: with

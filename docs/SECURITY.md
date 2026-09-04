@@ -258,6 +258,71 @@ forgery risk to defend against.
 
 ---
 
+## 8. Write-time deduplication: a design pivot, not a tuning choice
+
+`store_observation` folds an exact repeat of an existing observation into
+that observation rather than creating a new row — an agent stuck in a loop,
+or a re-imported backup, no longer fills the store with copies of the same
+fact. This section exists because the first implementation was wrong in a
+way worth recording.
+
+**What was tried first, and why it was abandoned.** The initial design
+compared the new content's embedding against existing observations by
+cosine similarity, calibrated against real near-duplicates: a
+punctuation-only variant of the same sentence scored ~0.98, a case-only
+variant ~0.96. A threshold of 0.95 looked well-clear of ordinary distinct
+content. Measuring it against a more realistic pattern — an agent logging
+"filler observation 0" through "23," the kind of thing a loop-tracking
+agent plausibly writes — found pairs scoring as high as **0.99**, higher
+than some of the genuine near-duplicates used to calibrate the threshold in
+the first place. Run against the app's own real-stack integration suite,
+that version silently collapsed 24 distinct observations down to 7. **There
+is no cosine threshold that reliably separates "the same fact restated"
+from "meaningfully different short observations that happen to share most
+of their words."** Short sentence embeddings compress into a tight cluster
+regardless of whether the differing detail — a number, an item name — is
+the entire point of the observation. This is disclosed rather than buried
+because it's the kind of failure that stays invisible until someone
+measures it directly, which is what happened here.
+
+**What ships instead.** Dedup compares *normalized text*, not embeddings:
+case-folded, whitespace-collapsed, trailing punctuation stripped. Two
+observations merge only if they are the same sentence after that
+normalization — never merely similar. This has no false-positive mode for
+distinct content, at the cost of not catching genuine paraphrases (which is
+the correct trade-off: silently losing a paraphrased second fact would be
+worse than occasionally storing a near-duplicate that could have merged).
+
+**Scope, matching the pattern already established for supersedes:**
+
+- Only observations from the **same author** are dedup candidates —
+  sidesteps the whole human/agent trust question entirely, the same way
+  supersede's eligibility rule does. An agent's restated fact can only ever
+  merge into another agent-authored row, never a human's or another
+  agent's via a different author path; dedup cannot become a second,
+  quieter way to touch someone else's memory.
+- Only within a **5-minute window** of each other, keyed off each
+  observation's own `timestamp` field (not wall-clock insertion time), so a
+  fact deliberately backdated or legitimately re-observed months later
+  stays two distinct, separately-timestamped rows — exactly what
+  `get_working_memory`'s recency ranking exists to compare.
+- A **superseded** observation is never a merge target, so dedup cannot
+  quietly revive a retired memory by bumping its recency back to current.
+- Skipped entirely whenever `supersedes` is given — that call already
+  signals "this is deliberately a new, distinct record."
+- Import runs the identical check per record, which is what makes
+  re-importing an already-present backup merge instead of duplicate: both
+  copies share `author: "imported"` and, for a byte-identical re-import,
+  the same source timestamp.
+
+**Verified against real content, not just the mocked test suite:** the
+real-stack integration suite stores literal repeats through the actual
+tool and confirms they merge, and separately stores the exact
+"observation 1" / "observation 2" pattern that broke the embedding-based
+version and confirms it does *not* merge.
+
+---
+
 ## What is deliberately not claimed
 
 - **That prompt injection is solved.** It is made visible and bounded. A planted

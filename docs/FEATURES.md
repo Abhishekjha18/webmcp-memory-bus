@@ -69,6 +69,29 @@ can. It does not generalize the other direction — one agent-sourced memory
 can still supersede another unchecked, a disclosed, not fully closed, gap.
 See [SECURITY.md](SECURITY.md#7-superseding-and-the-stealth-suppression-risk-it-opens).
 
+**Write-time deduplication.** Storing an exact repeat — same text after
+case/whitespace/punctuation normalization, same author, within 5 minutes —
+merges into the existing observation instead of creating a new one,
+bumping its timestamp and unioning its tags. Fixes an agent stuck in a
+loop filling the store with copies of the same fact, and re-importing an
+already-present backup file, in one mechanism. Deliberately text-based,
+not embedding-based: a similarity-threshold version was tried, measured
+against real content, and found to misclassify distinct short
+observations as duplicates at a real, non-negligible rate — see
+[SECURITY.md §8](SECURITY.md#8-write-time-deduplication-a-design-pivot-not-a-tuning-choice)
+for the actual numbers.
+
+**Tag-scoped retrieval.** `retrieve_relevant` and `get_working_memory` both
+take an optional `tags` array, narrowing the search to observations
+carrying at least one of them before ranking. Case-insensitive, matches
+any (not all) of the requested tags, and a missing or malformed value is
+treated as no filter rather than an error.
+
+**Storage usage, visible.** The footer shows an approximate usage/quota
+figure from `navigator.storage.estimate()`, refreshed alongside every
+other view of the store. Degrades to showing nothing — not an error — on
+a browser that lacks the API.
+
 **Export and import.** The whole store round-trips as a JSON file, so memory is
 portable across browsers and machines and survives clearing site data. Imports
 are treated as untrusted input: records are re-sanitized and re-flagged, and
@@ -78,8 +101,8 @@ appended rather than overwriting.
 arguments and result or error, rendered in the UI. Useful for watching an agent
 actually use the store, and the reason a failing tool call is diagnosable at all.
 
-**169 unit tests** across sanitization, store logic, graph traversal and the
-tool layer, plus a real-stack integration suite (14/14) that exercises the
+**194 unit tests** across sanitization, store logic, graph traversal and the
+tool layer, plus a real-stack integration suite (17/17) that exercises the
 actual embedding model and IndexedDB rather than mocks, gating deploy in CI.
 
 ---
@@ -101,12 +124,21 @@ browser, which exercises every line of the same code paths. What has *not* been
 exercised is Chrome's actual agent IPC delivering a call from a real model,
 because that requires a flag-enabled browser with an agent attached. The
 `document.modelContext`-first resolution order is written to match the current
-spec surface but is likewise unverified against a live build.
+spec surface but is likewise unverified against a live build. The same caveat
+applies more strongly to the extension: `extension-parity.test.js` confirms its
+duplicated tool declarations match the site's, but no automated test in this
+repo has loaded it as an actual unpacked extension in Chrome — its
+`register-tools.js` → `background.js`/`offscreen.js` → `bridge.html` relay path
+is verified by code review and by the fact that it calls the same, already
+heavily-tested `memoryStore`/`webmcpTools` functions, not by an end-to-end run.
 
 **No cap on stored volume, no eviction.** Retrieval is a linear scan over every
 stored observation. At a few thousand records this will be visibly slow, and
 nothing prunes old memories. There is no pagination, archival, or index beyond
-IndexedDB's own.
+IndexedDB's own. Write-time dedup narrows this — a literal repeat no longer
+adds a row — but does nothing for a store full of genuinely distinct
+observations, which is the actual growth case at any real scale. The
+footer's storage estimate makes the growth visible; it doesn't slow it down.
 
 **Embedding quality is MiniLM-quality.** A 6-layer, 384-dimension model chosen
 to be small enough to ship to a browser. It handles paraphrase and topical

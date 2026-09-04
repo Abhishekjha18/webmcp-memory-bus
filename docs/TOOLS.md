@@ -46,10 +46,18 @@ Record something read, decided, or noticed.
 
 Returns the stored record, including its assigned `id`, a `flagged` boolean,
 `author: "agent"` — set unconditionally by the tool boundary itself, not by
-anything in the arguments — and `supersedes`/`supersededBy` (both `null`
-unless a valid, allowed `supersedes` was given). See
-[SECURITY.md](SECURITY.md#6-provenance-and-the-humanagent-trust-boundary) and
-[§7](SECURITY.md#7-superseding-and-the-stealth-suppression-risk-it-opens).
+anything in the arguments — `supersedes`/`supersededBy` (both `null` unless
+a valid, allowed `supersedes` was given), and `merged`. See
+[SECURITY.md](SECURITY.md#6-provenance-and-the-humanagent-trust-boundary),
+[§7](SECURITY.md#7-superseding-and-the-stealth-suppression-risk-it-opens),
+and [§8](SECURITY.md#8-write-time-deduplication-a-design-pivot-not-a-tuning-choice).
+
+**`merged: true`** means this call didn't create a new row — the content
+exactly matched (after case/whitespace/punctuation normalization) an
+existing observation from the same author within the last 5 minutes, so
+the id returned is the *existing* observation's, with its timestamp
+refreshed and tags unioned in. Skipped entirely when `supersedes` is
+given.
 
 Hidden codepoints are stripped from `content` and `tags` before storage.
 Injection-shaped text is **flagged, not altered** — see
@@ -69,6 +77,7 @@ Semantic similarity search over stored observations.
 | `query` | string | yes | What to search for. |
 | `task_context` | string | no | Appended to the query before embedding, to bias results toward the current task. |
 | `limit` | number | no | Default 5, hard-capped at 20. |
+| `tags` | string[] | no | Only search observations carrying at least one of these tags (case-insensitive, matches any). |
 
 Returns an array sorted by descending `score` (cosine similarity, 0–1). Each
 result carries the observation's fields plus `score`; `embedding` is stripped and
@@ -87,6 +96,7 @@ Relevant *and* recent observations for what is happening right now.
 |---|---|---|---|
 | `current_task` | string | yes | What the caller is working on. |
 | `limit` | number | no | Default 5, hard-capped at 20. |
+| `tags` | string[] | no | Only consider observations carrying at least one of these tags (case-insensitive, matches any). |
 
 Returns results carrying both `similarity` (pure cosine) and `score`
 (recency, provenance, *and* supersede status all blended), so a caller can

@@ -46,8 +46,8 @@ Suggested things to ask an agent:
 | Tool | Purpose |
 |---|---|
 | `store_observation(content, source_url?, timestamp?, tags?, supersedes?)` | Record something the agent read, decided, or noticed; optionally retire an older observation by id. |
-| `retrieve_relevant(query, task_context?, limit?)` | Semantic similarity search over stored observations. |
-| `get_working_memory(current_task, limit?)` | Relevant + recent observations for what's happening right now. |
+| `retrieve_relevant(query, task_context?, limit?, tags?)` | Semantic similarity search over stored observations. |
+| `get_working_memory(current_task, limit?, tags?)` | Relevant + recent observations for what's happening right now. |
 | `link_concepts(entity1, entity2, relation, confidence?)` | Record a relation between two entities in the semantic graph. |
 | `summarize_context(time_range?, topic_filter?)` | Filtered digest of observations + concept links for the caller to summarize. |
 | `explore_concepts(entity, depth?)` | Walk the concept graph outward from one entity, returning connected concepts, edges, and tagged observations. |
@@ -105,7 +105,7 @@ npm run build
 npm test
 ```
 
-169 unit tests covering sanitization, store and ranking logic, graph traversal,
+194 unit tests covering sanitization, store and ranking logic, graph traversal,
 and the tool layer (registration, annotations, budgets, shielding, activity
 logging) against a mocked `modelContext` and an in-memory IndexedDB, plus a
 real-stack integration suite that runs the same tools against the actual
