@@ -311,6 +311,15 @@ describe("store_observation provenance", () => {
       expect.objectContaining({ supersedes: 7, author: "agent" }),
     );
   });
+
+  it("declares tags as an optional parameter on retrieve_relevant and get_working_memory", () => {
+    const retrieveSpec = TOOL_SPECS.find((s) => s.name === "retrieve_relevant");
+    const workingMemorySpec = TOOL_SPECS.find((s) => s.name === "get_working_memory");
+    expect(retrieveSpec.inputSchema.properties.tags).toBeDefined();
+    expect(retrieveSpec.inputSchema.required).not.toContain("tags");
+    expect(workingMemorySpec.inputSchema.properties.tags).toBeDefined();
+    expect(workingMemorySpec.inputSchema.required).not.toContain("tags");
+  });
 });
 
 describe("activity logging", () => {

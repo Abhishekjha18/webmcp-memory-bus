@@ -77,6 +77,11 @@
           query: { type: "string", description: "What to search memory for." },
           task_context: { type: "string", description: "Extra context about the current task." },
           limit: { type: "number", description: "Max results (default 5, max 20)." },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description: "Only search observations carrying at least one of these tags.",
+          },
         },
         required: ["query"],
       },
@@ -91,6 +96,11 @@
         properties: {
           current_task: { type: "string", description: "What the caller is working on now." },
           limit: { type: "number", description: "Max results (default 5, max 20)." },
+          tags: {
+            type: "array",
+            items: { type: "string" },
+            description: "Only consider observations carrying at least one of these tags.",
+          },
         },
         required: ["current_task"],
       },
