@@ -33,3 +33,26 @@ export function getDB() {
   }
   return dbPromise;
 }
+
+/**
+ * Approximate browser storage usage for this origin.
+ *
+ * `navigator.storage.estimate()` is itself approximate and, per spec, the
+ * browser may pad or round the numbers to resist fingerprinting — this is
+ * a rough gauge for "is this getting large," not an exact accounting. Not
+ * every browser implements it (older Safari, some private-browsing modes),
+ * so this degrades to `{ supported: false }` rather than throwing, the
+ * same pattern used elsewhere for a browser that lacks a capability this
+ * app leans on.
+ */
+export async function getStorageEstimate() {
+  if (typeof navigator === "undefined" || !navigator.storage?.estimate) {
+    return { supported: false };
+  }
+  try {
+    const { usage, quota } = await navigator.storage.estimate();
+    return { supported: true, usageBytes: usage ?? 0, quotaBytes: quota ?? 0 };
+  } catch {
+    return { supported: false };
+  }
+}
