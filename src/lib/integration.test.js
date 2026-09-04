@@ -161,4 +161,33 @@ describe.skipIf(!run)("integration: real tools, real embeddings", () => {
     });
     expect(attempt.supersedes).toBeNull();
   });
+
+  it("merges a real repeated tool call instead of creating a duplicate row", async () => {
+    const first = await call("store_observation", { content: "the on-call rotation is in the wiki" });
+    const second = await call("store_observation", { content: "the on-call rotation is in the wiki" });
+    expect(second.merged).toBe(true);
+    expect(second.id).toBe(first.id);
+  });
+
+  it("does not merge two real, distinct enumerated observations", async () => {
+    // The exact pattern that broke an early cosine-similarity design of
+    // this feature: real MiniLM embeddings score these as high as 0.99.
+    const a = await call("store_observation", { content: "batch job run 1 completed" });
+    const b = await call("store_observation", { content: "batch job run 2 completed" });
+    expect(b.merged).toBe(false);
+    expect(b.id).not.toBe(a.id);
+  });
+
+  it("scopes real retrieve_relevant and get_working_memory results by tag", async () => {
+    await call("store_observation", { content: "database connection pooling settings", tags: ["infra"] });
+    await call("store_observation", { content: "database connection pooling in the UI copy", tags: ["frontend"] });
+
+    const scoped = await call("retrieve_relevant", { query: "database connection pooling", tags: ["infra"] });
+    expect(scoped.length).toBeGreaterThan(0);
+    expect(scoped.every((r) => r.tags.includes("infra"))).toBe(true);
+
+    const scopedWm = await call("get_working_memory", { current_task: "database connection pooling", tags: ["infra"] });
+    expect(scopedWm.length).toBeGreaterThan(0);
+    expect(scopedWm.every((r) => r.tags.includes("infra"))).toBe(true);
+  }, 120_000);
 });
