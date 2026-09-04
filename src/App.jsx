@@ -2,6 +2,7 @@ import { useEffect, useState, useCallback, useRef } from "react";
 import "./App.css";
 import { registerMemoryBusTools, isWebMCPAvailable, onToolActivity } from "./lib/webmcpTools";
 import { onModelProgress } from "./lib/embeddings";
+import { getStorageEstimate } from "./lib/db";
 import {
   storeObservation,
   retrieveRelevant,
@@ -51,6 +52,24 @@ function sourceLabel(url) {
   } catch {
     return "source";
   }
+}
+
+/**
+ * Estimates from navigator.storage.estimate() are already an
+ * approximation (the spec allows the browser to pad or round them), so a
+ * one-decimal human size is more honest than a precise-looking byte count.
+ */
+function formatBytes(bytes) {
+  if (!Number.isFinite(bytes) || bytes < 0) return "unknown";
+  if (bytes < 1024) return `${bytes} B`;
+  const units = ["KB", "MB", "GB", "TB"];
+  let value = bytes;
+  let unit = -1;
+  do {
+    value /= 1024;
+    unit++;
+  } while (value >= 1024 && unit < units.length - 1);
+  return `${value.toFixed(1)} ${units[unit]}`;
 }
 
 const AUTHOR_LABELS = {
@@ -138,12 +157,18 @@ export default function App() {
 
   const [modelProgress, setModelProgress] = useState(null);
   const [transferNote, setTransferNote] = useState("");
+  const [storageEstimate, setStorageEstimate] = useState(null);
   const fileInputRef = useRef(null);
 
   const refresh = useCallback(async () => {
-    const [obs, rels] = await Promise.all([getAllObservationsForUI(), getAllRelationsForUI()]);
+    const [obs, rels, estimate] = await Promise.all([
+      getAllObservationsForUI(),
+      getAllRelationsForUI(),
+      getStorageEstimate(),
+    ]);
     setObservations(obs);
     setRelations(rels);
+    setStorageEstimate(estimate);
   }, []);
 
   useEffect(() => {
@@ -240,6 +265,7 @@ export default function App() {
       const result = await importMemory(JSON.parse(await file.text()));
       setTransferNote(
         `Imported ${result.observations} observations and ${result.relations} concept links` +
+          (result.merged ? `, merged ${result.merged} that already matched an existing memory` : "") +
           (result.skipped ? `, skipped ${result.skipped} malformed records.` : "."),
       );
     } catch (err) {
@@ -647,6 +673,15 @@ export default function App() {
 
       <footer className="footer">
         Runs entirely in your browser — IndexedDB storage, local embeddings, no server.
+        {storageEstimate?.supported && (
+          <>
+            {" · "}
+            <span title="An approximation the browser itself provides; it may be rounded or padded.">
+              {formatBytes(storageEstimate.usageBytes)}
+              {storageEstimate.quotaBytes > 0 && ` of ${formatBytes(storageEstimate.quotaBytes)}`} used
+            </span>
+          </>
+        )}
       </footer>
     </div>
   );
